@@ -93,18 +93,19 @@ void servo_setup(void)
             // Очистить циклический буфер перед чтением (вычитать все старое)
             uint8_t dummy;
             while (MksServo_RxGetByte(&mksServo, &dummy));
-            // Команда чтения энкодера (carry): FA 01 30 CRC, ответ: FB 01 30 carry(4) value(2) CRC
+            // Команда чтения позиции: FA 01 31 CRC
             uint8_t tx[4];
             tx[0] = 0xFA;
             tx[1] = mksServo.device_address;
-            tx[2] = 0x30;
+            tx[2] = 0x31;
             tx[3] = MksServo_GetCheckSum(tx, 3);
             HAL_GPIO_WritePin(mksServo.dere_port, mksServo.dere_pin, GPIO_PIN_SET);
             HAL_Delay(1);
             HAL_UART_Transmit(mksServo.huart, tx, 4, 100);
             HAL_GPIO_WritePin(mksServo.dere_port, mksServo.dere_pin, GPIO_PIN_RESET);
-            // Ждем ответ энкодера (9 байт: FB 01 30 + 4 + 2 + CRC)
-            uint8_t rx[9];
+
+            // Ждем ответ энкодера (10 байт: FB 01 31 + 4 + 2 + CRC)
+            uint8_t rx[10];
             uint32_t start = HAL_GetTick();
             uint8_t rx_cnt = 0;
             while ((HAL_GetTick() - start) < 100) {
@@ -115,12 +116,11 @@ void servo_setup(void)
                     } else if (b == 0xFB) {
                         rx[rx_cnt++] = b;
                     }
-                    if (rx_cnt == 9) {
-                        // Дамп всех байт
+                    if (rx_cnt == 10) {
                         printf("[MKS] RAW ENCODER BYTES: ");
-                        for (int i = 0; i < 9; i++) printf("%02X ", rx[i]);
+                        for (int i = 0; i < 10; i++) printf("%02X ", rx[i]);
                         printf("\r\n");
-                        if (rx[8] == MksServo_GetCheckSum(rx, 8)) {
+                        if (rx[9] == MksServo_GetCheckSum(rx, 9)) {
                             int32_t carry = (int32_t)(rx[3] | (rx[4]<<8) | (rx[5]<<16) | (rx[6]<<24));
                             uint16_t value = (uint16_t)(rx[7] | (rx[8]<<8));
                             printf("[MKS] Encoder: carry=%ld value=%u\r\n", carry, value);
