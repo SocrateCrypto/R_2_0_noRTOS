@@ -1,0 +1,72 @@
+if (updateButtonsState())
+    {
+      // Новая логика для Initial
+      if (stateMachine.is(State::Initial)) {
+        if (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON) {
+          stateMachine.setState(State::Manual);
+          printf("[FSM] Initial: pedal pressed -> Manual\n");
+        }
+        // Если педали не нажаты, остаёмся в Initial и ничего не делаем
+        continue; // Пропустить остальные проверки
+      }
+
+      if (buttonsState.gyro == BUTTON_OFF &&
+          buttonsState.turn_right == BUTTON_OFF &&
+          buttonsState.turn_left == BUTTON_OFF &&
+          buttonsState.calibrate == BUTTON_OFF &&
+          buttonsState.bind_mode == BUTTON_OFF&&
+          stateMachine.is(State::Manual))
+      {
+       // stateMachine.setState(State::Initial);
+      }
+      else if (buttonsState.calibrate == BUTTON_ON && buttonsState.bind_mode == BUTTON_ON)
+      {
+        stateMachine.setState(State::CalibrateAndBind);
+      }
+      else if (stateMachine.is(State::Scan) &&
+               (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
+      {
+        stateMachine.setState(State::Manual);
+        printf("[FSM] Scan: exit to Manual by pedal\n");
+      }
+      else
+      {
+        // Обработка двойного нажатия
+        DoubleButtonEvent dblEvt = updateDoubleButtonsState(true);
+        if (dblEvt == DOUBLE_BTN_SHORT)
+        {
+          if (stateMachine.is(State::Scan))
+          {
+            stateMachine.setState(State::Manual);
+            printf("[FSM] Double short: Scan -> Manual\n");
+          }
+          else if (stateMachine.is(State::Manual) || stateMachine.is(State::GiroScope))
+          {
+            stateMachine.setState(State::Scan);
+            printf("[FSM] Double short: Manual/GiroScope -> Scan\n");
+          }
+        }
+        else if (dblEvt == DOUBLE_BTN_LONG)
+        {
+          // Длительное двойное нажатие (>5 сек)
+          // Здесь можно добавить переход в режим настройки угла поиска
+          stateMachine.setState(State::AngleAdjust);
+          printf("[FSM] Double long: -> AngleAdjust\n");
+        }
+        else if (buttonsState.bind_mode == BUTTON_ON)
+        {
+          stateMachine.setState(State::BindMode);
+        }
+        else if (buttonsState.calibrate == BUTTON_ON)
+        {
+          stateMachine.setState(State::Calibrate);
+        }
+        else if (buttonsState.gyro == BUTTON_ON)
+        {
+          stateMachine.setState(State::GiroScope);
+        }
+        // Можно добавить обработку turn_left/turn_right для ручного управления
+      }
+    }
+  // State current = stateMachine.getState();
+    // printf("State machine task: current state = %s\r\n", stateToStr(current));
