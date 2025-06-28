@@ -132,7 +132,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-static bool flag_first_run = false; // Флаг для первого запуска педали
+    static bool flag_first_run = false; // Флаг для первого запуска педали
     StateMachine_loop();
     // Условный выбор действий по текущему состоянию
     switch (stateMachine.getState())
@@ -144,8 +144,10 @@ static bool flag_first_run = false; // Флаг для первого запус
       // TODO: действия для Manual
       if (buttonsState.turn_left == BUTTON_ON && !flag_first_run) // Если педаль нажата
       {
-
-        flag_first_run = true;                             // Флаг для первого запуска
+        int32_t carry = 0;
+        uint16_t value = 0;
+        flag_first_run = true;
+        MksServo_GetCarry(&mksServo, &carry, &value, 100); // Флаг для первого запуска
         MksServo_SpeedModeRun(&mksServo, 0x01, 1500, 200); //
 
         printf("[MKS] Servo running left\r\n");

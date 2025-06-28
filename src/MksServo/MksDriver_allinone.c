@@ -393,6 +393,7 @@ void MksServo_EmergencyStop_Simple(MksServo_t *servo) {
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
     HAL_Delay(1);
     HAL_UART_Transmit(servo->huart, buffer, 5, 100);
+   
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
     printf("[MKS][SIMPLE STOP] Sent: AA F7 00 00 55\r\n");
 }
@@ -400,10 +401,13 @@ void MksServo_EmergencyStop_Simple(MksServo_t *servo) {
 // --- ENCODER READOUT ---
 // Чтение carry и value (команда 0x30)
 uint8_t MksServo_GetCarry(MksServo_t *servo, int32_t *carry, uint16_t *value, uint32_t timeout_ms) {
+    // Очистка кольцевого буфера перед отправкой команды
+    servo->rx_head = 0;
+    servo->rx_tail = 0;
     uint8_t tx[4];
     tx[0] = 0xFA;
     tx[1] = servo->device_address;
-    tx[2] = 0x30;
+    tx[2] = 0x30; // Команда 0x30 для carry
     tx[3] = MksServo_GetCheckSum(tx, 3);
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
     HAL_Delay(1);
@@ -414,30 +418,41 @@ uint8_t MksServo_GetCarry(MksServo_t *servo, int32_t *carry, uint16_t *value, ui
     uint8_t rx[10];
     uint32_t start = HAL_GetTick();
     uint8_t rx_cnt = 0;
+    uint8_t found = 0;
     while ((HAL_GetTick() - start) < timeout_ms) {
         uint8_t b;
         if (MksServo_RxGetByte(servo, &b)) {
-            if (rx_cnt != 0) {
-                rx[rx_cnt++] = b;
-            } else if (b == 0xFB) {
-                rx[rx_cnt++] = b;
-            }
-            if (rx_cnt == 9) {
-                // Проверка CRC
-                if (rx[8] == MksServo_GetCheckSum(rx, 8)) {
-                    if (rx[2] == 0x30) {
-                        *carry = (int32_t)(
-                            ((uint32_t)rx[3]) |
-                            ((uint32_t)rx[4] << 8) |
-                            ((uint32_t)rx[5] << 16) |
-                            ((uint32_t)rx[6] << 24)
-                        );
-                        *value = (uint16_t)(rx[7] | (rx[8-1] << 8));
-                        printf("[MKS] Encoder carry: %ld, value: %u\r\n", *carry, *value);
-                        return 1;
-                    }
+            if (!found) {
+                if (b == 0xFB) {
+                    rx[0] = b;
+                    rx_cnt = 1;
+                    found = 1;
                 }
-                rx_cnt = 0;
+            } else {
+                rx[rx_cnt++] = b;
+                if (rx_cnt == 10) {
+                    // Выводим весь принятый пакет для отладки
+                    printf("[MKS][0x30] RX PACKET: ");
+                    for (int i = 0; i < 10; i++) printf("%02X ", rx[i]);
+                    printf("\r\n");
+                    // Проверка CRC
+                    if (rx[9] == MksServo_GetCheckSum(rx, 9)) {
+                        if (rx[2] == 0x30) {
+                            // Изменён порядок байтов carry на little-endian
+                            *carry = (int32_t)(
+                                ((uint32_t)rx[6]) |
+                                ((uint32_t)rx[5] << 8) |
+                                ((uint32_t)rx[4] << 16) |
+                                ((uint32_t)rx[3] << 24)
+                            );
+                            *value = (uint16_t)(rx[7] | (rx[8] << 8));
+                            printf("[MKS] Encoder carry: %ld, value: %u\r\n", *carry, *value);
+                            return 1;
+                        }
+                    }
+                    found = 0;
+                    rx_cnt = 0;
+                }
             }
         }
     }
