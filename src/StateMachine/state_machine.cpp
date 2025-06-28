@@ -40,9 +40,9 @@ const char *stateToStr(State state)
 
 void StateMachine_loop(void)
 {
-   
-    
 
+    static bool flag_blocked_for_debounce = 0; // Флаг блокировки Scan
+    static uint32_t debounce_timer = 0;
     if (updateButtonsState())
     {
         // 1. Приоритет: CalibrateAndBind
@@ -125,15 +125,44 @@ void StateMachine_loop(void)
             printf("[FSM] -> Initial (from Bind/Calibrate)\n");
         }
         printf("Current state: %s\n", stateToStr(stateMachine.getState()));
+
+        // логика для Scan
+        if (stateMachine.is(State::Initial) ||
+            stateMachine.is(State::Manual) ||
+            stateMachine.is(State::GiroScope))
+        {
+            // Проверка нажатия педалей
+            if ((buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON) &&
+                !flag_blocked_for_debounce) // Проверяем флаг блокировки
+            {
+                stateMachine.setState(State::Scan);
+                flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
+               debounce_timer = HAL_GetTick();
+                printf("[FSM] -> Scan (double_pedal pressed)\n");
+            }
+        }
+        if (stateMachine.is(State::Scan) && !flag_blocked_for_debounce && (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
+        {
+            stateMachine.setState(State::Manual);
+            printf("[FSM] -> Manual (pedal released)\n");
+        }
     }
 
     
+// Сброс блокировки для антидребезга во время 
+//отпускания  педалей при заходе в Scan через 0.8 сек
+    if (flag_blocked_for_debounce)
+    {
+        if (HAL_GetTick() - debounce_timer > 800)
+        {
+            flag_blocked_for_debounce = 0;
+        }
+    }
 }
 
 void StateMachine_setup(void)
 {
 
- stateMachine.setState(State::Initial);
-  buttonsDebounceInit();
-
+    stateMachine.setState(State::Initial);
+    buttonsDebounceInit();
 }

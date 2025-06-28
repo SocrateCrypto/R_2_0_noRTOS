@@ -57,50 +57,43 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
 {
     static uint8_t prev = 0;
     static uint32_t press_start = 0;
-    static uint8_t short_triggered = 0;
-    static uint8_t long_triggered = 0;
+    static uint8_t event_sent = 0; // 0: ничего, 1: PRESS, 2: SHORT, 3: LONG
+    static uint8_t released_sent = 0;
 
     uint8_t now = (buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON);
-
     DoubleButtonEvent result = DOUBLE_BTN_NONE;
 
     if (now) {
         if (!prev) {
-            // Начало одновременного нажатия
+            // Первое одновременное нажатие
             press_start = HAL_GetTick();
-            short_triggered = 0;
-            long_triggered = 0;
-        }
-        uint32_t held = HAL_GetTick() - press_start;
-        if (!short_triggered && held >= 500 && held < 5000) {
-            short_triggered = 1;
-            result = DOUBLE_BTN_SHORT;
-            printf("[DoubleButtons] SHORT event: held = %lu ms\n", held);
-        }
-        if (!long_triggered && held >= 5000) {
-            long_triggered = 1;
-            result = DOUBLE_BTN_LONG;
-            printf("[DoubleButtons] LONG event: held = %lu ms\n", held);
+            event_sent = 0;
+            released_sent = 0;
+            result = DOUBLE_BTN_PRESS;
+            event_sent = 1;
+            printf("[DBTN] PRESS: both pedals pressed, t=%lu\n", HAL_GetTick());
+        } else {
+            uint32_t held = HAL_GetTick() - press_start;
+            if (held >= 5000 && event_sent < 3) {
+                result = DOUBLE_BTN_LONG;
+                event_sent = 3;
+                printf("[DBTN] LONG: held %lu ms\n", held);
+            } else if (held >= 500 && event_sent < 2) {
+                result = DOUBLE_BTN_SHORT;
+                event_sent = 2;
+                printf("[DBTN] SHORT: held %lu ms\n", held);
+            }
         }
     } else {
-        // Кнопки отпущены — сбросить состояние
-        if (prev) {
-            printf("[DoubleButtons] RELEASE event\n");
+        if (prev && !released_sent) {
+            result = DOUBLE_BTN_RELEASE;
+            released_sent = 1;
+            printf("[DBTN] RELEASE: both pedals released, t=%lu\n", HAL_GetTick());
         }
-        short_triggered = 0;
-        long_triggered = 0;
         press_start = 0;
+        event_sent = 0;
     }
-
     prev = now;
-
-    // Если autoReset и было событие — сбросить состояние, но только если кнопки отпущены и снова нажаты
-    if (autoReset && result != DOUBLE_BTN_NONE) {
-        // Сбросить триггеры, чтобы событие могло сработать только после отпускания и нового нажатия
-        short_triggered = 1;
-        long_triggered = 1;
-    }
-
     return result;
 }
 

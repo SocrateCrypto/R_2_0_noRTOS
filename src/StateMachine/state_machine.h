@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 enum class State
 {
@@ -28,3 +29,12 @@ extern StateMachine stateMachine; // Экземпляр stateMachine
 
 void StateMachine_loop(void);
 void StateMachine_setup(void);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern uint8_t scan_blocked;
+extern uint32_t scan_blocked_timer;
+#ifdef __cplusplus
+}
+#endif

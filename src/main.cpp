@@ -23,7 +23,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#include "MksServo/MksServo_arduino.h"
+#include "MksServo/MksDriver_allinone.h"
+#include "MksServo/Motor_position_state_structure.h"
+#include "Buttons/buttons.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,78 +73,12 @@ static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
-void servo_setup(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void servo_setup(void)
-{
-    // Инициализация библиотеки для работы с DERE и RS485
-    MksServo_Init(&mksServo, &huart3, GPIOB, RS485_DERE_Pin, 1); // адрес 1
-    printf("[MKS] Servo lib ready\r\n");
 
-    uint16_t runSpeed = 100;
-    uint8_t runDir = 1;
-    while (1) {
-        printf("[MKS] Run dir=%d speed=%d\r\n", runDir, runSpeed);
-        MksServo_SpeedModeRun(&mksServo, runDir, runSpeed, 2); // acc=2
-        uint8_t status = MksServo_WaitForACK(&mksServo, 5, 3000);
-        if (status == 1) {
-            // --- Чтение энкодера после смены скорости ---
-            // Очистить циклический буфер перед чтением (вычитать все старое)
-            uint8_t dummy;
-            while (MksServo_RxGetByte(&mksServo, &dummy));
-            // Команда чтения позиции: FA 01 31 CRC
-            uint8_t tx[4];
-            tx[0] = 0xFA;
-            tx[1] = mksServo.device_address;
-            tx[2] = 0x31;
-            tx[3] = MksServo_GetCheckSum(tx, 3);
-            HAL_GPIO_WritePin(mksServo.dere_port, mksServo.dere_pin, GPIO_PIN_SET);
-            HAL_Delay(1);
-            HAL_UART_Transmit(mksServo.huart, tx, 4, 100);
-            HAL_GPIO_WritePin(mksServo.dere_port, mksServo.dere_pin, GPIO_PIN_RESET);
-
-            // Ждем ответ энкодера (10 байт: FB 01 31 + 4 + 2 + CRC)
-            uint8_t rx[10];
-            uint32_t start = HAL_GetTick();
-            uint8_t rx_cnt = 0;
-            while ((HAL_GetTick() - start) < 100) {
-                uint8_t b;
-                if (MksServo_RxGetByte(&mksServo, &b)) {
-                    if (rx_cnt != 0) {
-                        rx[rx_cnt++] = b;
-                    } else if (b == 0xFB) {
-                        rx[rx_cnt++] = b;
-                    }
-                    if (rx_cnt == 10) {
-                        printf("[MKS] RAW ENCODER BYTES: ");
-                        for (int i = 0; i < 10; i++) printf("%02X ", rx[i]);
-                        printf("\r\n");
-                        if (rx[9] == MksServo_GetCheckSum(rx, 9)) {
-                            int32_t carry = (int32_t)(rx[3] | (rx[4]<<8) | (rx[5]<<16) | (rx[6]<<24));
-                            uint16_t value = (uint16_t)(rx[7] | (rx[8]<<8));
-                            printf("[MKS] Encoder: carry=%ld value=%u\r\n", carry, value);
-                        } else {
-                            printf("[MKS] Encoder CRC error\r\n");
-                        }
-                        break;
-                    }
-                }
-            }
-            // --- Конец чтения энкодера ---
-            runSpeed += 100;
-            if (runSpeed > 300) {
-                runSpeed = 0;
-                runDir ^= 1;
-            }
-        } else {
-            printf("[MKS] Run failed or timeout!\r\n");
-        }
-        HAL_Delay(3000);
-    }
-}
 /* USER CODE END 0 */
 
 /**
@@ -182,49 +118,74 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   StateMachine_setup(); // Инициализация машины состояний
-  
+
   // Тест UART
   printf("UART1 Test: Hello World!\r\n");
   printf("UART1 Printf Test: %d\r\n", 123);
   setvbuf(stdout, NULL, _IONBF, 0); // Отключить буферизацию
   /* USER CODE END 2 */
   HAL_Delay(3000); // Пауза после инициализации
-servo_setup(); // Инициализация сервоприводов
+  MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
+  MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    
-     StateMachine_loop();
-   // Условный выбор действий по текущему состоянию
+static bool flag_first_run = false; // Флаг для первого запуска педали
+    StateMachine_loop();
+    // Условный выбор действий по текущему состоянию
     switch (stateMachine.getState())
     {
     case State::Initial:
-        // TODO: действия для Initial
-        break;
+      // TODO: действия для Initial
+      break;
     case State::Manual:
-        // TODO: действия для Manual
+      // TODO: действия для Manual
+      if (buttonsState.turn_left == BUTTON_ON && !flag_first_run) // Если педаль нажата
+      {
 
-        break;
+        flag_first_run = true;                             // Флаг для первого запуска
+        MksServo_SpeedModeRun(&mksServo, 0x01, 1500, 200); //
+
+        printf("[MKS] Servo running left\r\n");
+      }
+      else if (buttonsState.turn_right == BUTTON_ON && !flag_first_run) // Если педаль нажата
+      {
+
+        flag_first_run = true;                             // Флаг для первого запуска
+        MksServo_SpeedModeRun(&mksServo, 0x00, 1500, 200); //
+
+        printf("[MKS] Servo running right\r\n");
+      }
+      if (buttonsState.turn_right == BUTTON_OFF && buttonsState.turn_left == BUTTON_OFF && flag_first_run)
+      {
+        flag_first_run = false; // Сброс флага после отпускания педалей
+
+        MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+                                                      // MksServo_EmergencyStop_Simple(&mksServo);
+        printf("[MKS] Servo stopped\r\n");
+      }
+      break;
     case State::GiroScope:
 
-        break;
+      break;
     case State::Scan:
-        // TODO: действия для Scan
-        break;
+      // TODO: действия для Scan
+      break;
     case State::BindMode:
-        // TODO: действия для BindMode
-        break;
+      // TODO: действия для BindMode
+      break;
     case State::Calibrate:
-        // TODO: действия для Calibrate
+      // TODO: действия для Calibrate
 
-        break;
+      break;
     case State::CalibrateAndBind:
-        // TODO: действия для CalibrateAndBind
-        break;
+      // TODO: действия для CalibrateAndBind
+      break;
     default:
-        // TODO: обработка неизвестного состояния
-        break;
+      // TODO: обработка неизвестного состояния
+      break;
     }
   }
   /* USER CODE END 3 */
@@ -554,42 +515,43 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Глобальная переменная для сигнализации о завершении приема UART3
-// Callback функции для работы с UART прерываниями
+  // Глобальная переменная для сигнализации о завершении приема UART3
+  // Callback функции для работы с UART прерываниями
 
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
+  void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+  {
     // Callback при ошибке UART
     // Ничего дополнительного делать не нужно, HAL сам управляет состоянием
-}
+  }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
+  void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+  {
     if (huart == &huart3)
     {
-        // Здесь обработайте принятый байт: uart3_rx_byte
-        // Например, положите в свой буфер или обработайте сразу
-        MksServo_UART_IRQHandler(&mksServo, huart);
+      // Здесь обработайте принятый байт: uart3_rx_byte
+      // Например, положите в свой буфер или обработайте сразу
+      MksServo_UART_IRQHandler(&mksServo, huart);
 
-        // Перезапустить прием следующего байта
-        HAL_UART_Receive_IT(&huart3, &uart3_rx_byte, 1);
+      // Перезапустить прием следующего байта
+      HAL_UART_Receive_IT(&huart3, &uart3_rx_byte, 1);
     }
-}
+  }
 
-int __io_putchar(int ch)
-{
-  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
-  return ch;
-}
+  int __io_putchar(int ch)
+  {
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+    return ch;
+  }
 
-int _write(int file, char *ptr, int len)
-{
-    HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, HAL_MAX_DELAY);
+  int _write(int file, char *ptr, int len)
+  {
+    HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, HAL_MAX_DELAY);
     return len;
-}
+  }
 
 #ifdef __cplusplus
 }
