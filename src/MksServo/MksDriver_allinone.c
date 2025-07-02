@@ -317,6 +317,28 @@ uint8_t MksServo_PositionMode1Run(MksServo_t *servo, uint8_t dir, uint16_t speed
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
     return 1;
 }
+
+uint8_t MksServo_PositionMode2Run(MksServo_t *servo, int32_t rel_steps, uint16_t speed, uint8_t acc)
+{
+    uint8_t tx[11];
+    tx[0] = 0xFA;
+    tx[1] = servo->device_address;
+    tx[2] = 0xF4;
+    tx[3] = (speed >> 8) & 0xFF;
+    tx[4] = speed & 0xFF;
+    tx[5] = acc;
+    // Little Endian порядок байтов для rel_steps
+    tx[6] = (uint8_t)(rel_steps & 0xFF);
+    tx[7] = (uint8_t)((rel_steps >> 8) & 0xFF);
+    tx[8] = (uint8_t)((rel_steps >> 16) & 0xFF);
+    tx[9] = (uint8_t)((rel_steps >> 24) & 0xFF);
+    tx[10] = MksServo_GetCheckSum(tx, 10);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 11, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+    return 1;
+}
 void PollPositionErrorTask(void)
 {
     uint32_t now = HAL_GetTick();

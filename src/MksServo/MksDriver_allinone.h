@@ -60,6 +60,7 @@ uint8_t MksServo_MoveDegrees(MksServo_t *servo, float degrees, uint8_t acc);
 uint8_t MksServo_ReadResponse(MksServo_t *servo, uint8_t *rx, uint8_t rx_len, uint32_t timeout_ms);
 // --- POSITION ---
 uint8_t MksServo_PositionMode1Run(MksServo_t *servo, uint8_t dir, uint16_t speed, uint8_t acc, uint32_t pulses);
+uint8_t MksServo_PositionMode2Run(MksServo_t *servo, int32_t rel_steps, uint16_t speed, uint8_t acc);
 void PollPositionErrorTask(void);
 // --- EMERGENCY STOP ---
 uint8_t MksServo_EmergencyStop(MksServo_t *servo);

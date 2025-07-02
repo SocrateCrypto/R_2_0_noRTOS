@@ -1,9 +1,10 @@
-#include "state_machine.h"
+ #include "state_machine.h"
 #include "main.h" // Добавьте этот include ПЕРЕД другими
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_gpio.h"
 #include "../Buttons/buttons.h"
 #include "Potentiometr\Potentiometer.h"
+#include "MksServo/MksDriver_allinone.h"
 #include <stdio.h>
 
 StateMachine::StateMachine() : currentState(State::Initial) {}
@@ -14,7 +15,7 @@ bool StateMachine::is(State state) const { return currentState == state; }
 
 StateMachine stateMachine; // Экземпляр stateMachine
 // В начале файла (например, state_machine_task.cpp)
-
+extern MksServo_t mksServo; // Глобальная переменная для MKS Servo
 const char *stateToStr(State state)
 {
     switch (state)
@@ -135,6 +136,7 @@ void StateMachine_loop(void)
             if ((buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON) &&
                 !flag_blocked_for_debounce) // Проверяем флаг блокировки
             {
+                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
                 stateMachine.setState(State::Scan);
                 flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
                debounce_timer = HAL_GetTick();
@@ -145,6 +147,7 @@ void StateMachine_loop(void)
         {
             stateMachine.setState(State::Manual);
             printf("[FSM] -> Manual (pedal released)\n");
+            HAL_Delay(100); // Задержка для предотвращения дребезга
         }
     }
 

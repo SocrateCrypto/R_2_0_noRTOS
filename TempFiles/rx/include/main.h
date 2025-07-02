@@ -59,30 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_Pin GPIO_PIN_13
 #define LED_GPIO_Port GPIOC
-#define LED2_Pin GPIO_PIN_14
-#define LED2_GPIO_Port GPIOC
-#define ADC_Pin GPIO_PIN_0
-#define ADC_GPIO_Port GPIOA
-#define LAMP_Pin GPIO_PIN_1
-#define LAMP_GPIO_Port GPIOA
-#define CALL_Pin GPIO_PIN_4
-#define CALL_GPIO_Port GPIOA
-#define COMP_Pin GPIO_PIN_5
-#define COMP_GPIO_Port GPIOA
-#define BIND_Pin GPIO_PIN_6
-#define BIND_GPIO_Port GPIOA
-#define ADC_RES_Pin GPIO_PIN_7
-#define ADC_RES_GPIO_Port GPIOA
-#define LEFT_Pin GPIO_PIN_0
-#define LEFT_GPIO_Port GPIOB
-#define RIGHT_Pin GPIO_PIN_1
-#define RIGHT_GPIO_Port GPIOB
-#define RS485_DERE_Pin GPIO_PIN_2
-#define RS485_DERE_GPIO_Port GPIOB
 #define CSN_Pin GPIO_PIN_12
 #define CSN_GPIO_Port GPIOB
-#define IMU_EN_Pin GPIO_PIN_8
-#define IMU_EN_GPIO_Port GPIOA
 #define CE_Pin GPIO_PIN_8
 #define CE_GPIO_Port GPIOB
 #define IRQ_Pin GPIO_PIN_9
@@ -90,8 +68,7 @@ void Error_Handler(void);
 #define IRQ_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
-// Флаг прерывания от NRF24
-extern volatile uint8_t irq;
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

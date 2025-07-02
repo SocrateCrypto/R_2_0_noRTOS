@@ -20,12 +20,27 @@
 #include "main.h"
 #include <stdio.h>
 #include "StateMachine/state_machine.h"
+#include <string.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 #include "MksServo/MksDriver_allinone.h"
 #include "MksServo/Motor_position_state_structure.h"
 #include "Buttons/buttons.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "NRF/NRF24.h"
+#include "NRF/NRF24_conf.h"
+#include "NRF/NRF24_reg_addresses.h"
+
+// Объявление внешней переменной irq
+extern volatile uint8_t irq;
+
+#ifdef __cplusplus
+}
+#endif
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,10 +73,25 @@ UART_HandleTypeDef huart3;
 // Глобальная переменная для MKS Servo
 // Глобальный буфер для приема
 uint8_t uart3_rx_byte;
-
 MksServo_t mksServo;
 
-/* USER CODE END PV */
+// Определяем переменные для NRF24
+#define PLD_S 32 //payload size should be equal to transmitter
+
+// Флаг для включения подробного режима отладки (закомментировать для отключения)
+//#define VERBOSE_DEBUG
+
+uint8_t tx_addr[5] = {0x45, 0x55, 0x67, 0x10, 0x21};
+
+uint16_t data = 0;
+
+uint8_t rx_ack_pld[PLD_S] = {"OK"};
+
+volatile uint8_t data_ready = 0;
+
+uint8_t dataR[PLD_S];
+uint32_t processed_data = 0;  // Counter for processed packets
+
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -119,6 +149,56 @@ int main(void)
   /* USER CODE BEGIN 2 */
   StateMachine_setup(); // Инициализация машины состояний
 
+  printf("NRF24 RX Test Started\r\n");
+  printf("UART1 printf redirection working!\r\n");
+  
+  // Инициализация NRF24
+  ce_low();  // Сначала CE в LOW
+  HAL_Delay(100);  // Увеличиваем задержку для стабилизации
+  csn_high();  // Затем CSN в HIGH
+  HAL_Delay(100);  // Еще подождем
+  
+  nrf24_init();
+  
+  printf("NRF24 initialized\r\n");
+  
+  // Настройка NRF24 как приемника
+  nrf24_auto_ack_all(auto_ack);
+  nrf24_en_ack_pld(enable);
+  nrf24_en_dyn_ack(disable);
+  nrf24_dpl(disable);
+  
+  // Use CRC configuration
+  nrf24_set_crc(no_crc, _1byte);  // Отключаем CRC, устанавливаем 1 байт
+  nrf24_tx_pwr(_0dbm);
+  nrf24_data_rate(_1mbps);  // Синхронизируем с передатчиком
+  nrf24_set_channel(90);    // Синхронизируем с передатчиком
+  nrf24_set_addr_width(5);
+  
+  // Отключение динамических пакетов для всех каналов
+  nrf24_set_rx_dpl(0, disable);
+  nrf24_set_rx_dpl(1, disable);
+  nrf24_set_rx_dpl(2, disable);
+  nrf24_set_rx_dpl(3, disable);
+  nrf24_set_rx_dpl(4, disable);
+  nrf24_set_rx_dpl(5, disable);
+  
+  nrf24_pipe_pld_size(0, PLD_S);
+  
+  nrf24_auto_retr_delay(7);  // Задержка авто-повторов 750 мкс
+  nrf24_auto_retr_limit(10);
+  
+  nrf24_open_tx_pipe(tx_addr);
+  nrf24_open_rx_pipe(0, tx_addr);
+  
+  nrf24_listen();  // Включаем режим приема
+  ce_high();
+  
+  printf("NRF24 configured as receiver on channel 90\r\n");
+  printf("Address: 0x%02X%02X%02X%02X%02X\r\n", 
+         tx_addr[0], tx_addr[1], tx_addr[2], tx_addr[3], tx_addr[4]);
+  printf("Data rate: 1 Mbps, Payload size: %d bytes\r\n", PLD_S);
+
   // Тест UART
   printf("UART1 Test: Hello World!\r\n");
   printf("UART1 Printf Test: %d\r\n", 123);
@@ -132,6 +212,62 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if (irq) {
+      irq = 0;  // Сбрасываем флаг
+      
+      // Быстрая обработка прерывания без блокирующих операций
+      uint8_t status = nrf24_r_status();
+      
+      // Проверяем получение данных (RX_DR бит)
+      if (status & (1 << 6)) {  // RX_DR = бит 6
+        
+        if (nrf24_data_available()) {
+          nrf24_receive(dataR, PLD_S);
+          dataR[PLD_S - 1] = '\0';
+          
+          // Отмечаем, что данные готовы к обработке
+          data_ready = 1;
+          
+         
+        }
+        
+        // Очищаем флаг RX_DR
+        nrf24_clear_rx_dr();
+      }
+      
+      // Проверяем успешную отправку (TX_DS бит)
+      if (status & (1 << 5)) {  // TX_DS = бит 5
+        nrf24_clear_tx_ds();
+      }
+      
+      // Проверяем превышение лимита повторов (MAX_RT бит)
+      if (status & (1 << 4)) {  // MAX_RT = бит 4
+        nrf24_clear_max_rt();
+        nrf24_flush_tx();
+      }
+    }
+    
+    // Обработка полученных данных в основном цикле (вне прерывания)
+    if(data_ready)
+    {
+      data_ready = 0;
+      
+      // Выводим принятые данные
+      printf("Received data: %s\r\n", (char*)dataR);
+     // printf("Raw hex: ");
+     // for(int i = 0; i < PLD_S; i++)
+     // {
+      //  printf("%02X ", dataR[i]);
+     // }
+     // printf("\r\n");
+      processed_data++;
+      printf("Total packets processed: %lu\r\n", processed_data);
+    }
+    
+    
+    
+    /* USER CODE END WHILE */
+    /* USER CODE BEGIN 3 */
     static bool flag_first_run = false; // Флаг для первого запуска педали
     StateMachine_loop();
     // Условный выбор действий по текущему состоянию
@@ -497,11 +633,21 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LEFT_Pin RIGHT_Pin IRQ_Pin */
-  GPIO_InitStruct.Pin = LEFT_Pin | RIGHT_Pin | IRQ_Pin;
+  /*Configure GPIO pins : LEFT_Pin RIGHT_Pin */
+  GPIO_InitStruct.Pin = LEFT_Pin | RIGHT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IRQ_Pin */
+  GPIO_InitStruct.Pin = IRQ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL; // ИСПРАВЛЕНИЕ: убираем pull-up, т.к. IRQ уже подтянут на плате
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* Enable and set EXTI Line interrupt */
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
   /*Configure GPIO pins : RS485_DERE_Pin CSN_Pin CE_Pin */
   GPIO_InitStruct.Pin = RS485_DERE_Pin | CSN_Pin | CE_Pin;
