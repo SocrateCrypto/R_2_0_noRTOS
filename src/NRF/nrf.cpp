@@ -11,7 +11,7 @@
 RadioButtons RadioButtonsStates = {0}; // Инициализируем все биты нулями
 
 #define PLD_S 32  // Define PLD_S with an appropriate value
-#define RADIO_TIMEOUT 700 // Таймаут 0.7 секунды в миллисекундах
+#define RADIO_TIMEOUT 1500 // Увеличенный таймаут 1.5 секунды для надежности
 
 uint8_t tx_addr[5] = {0x45, 0x55, 0x67, 0x10, 0x21};
 
@@ -83,8 +83,10 @@ void nrf_loop(uint8_t irq)
       
       // Проверяем превышение лимита повторов (MAX_RT бит)
       if (status & (1 << 4)) {  // MAX_RT = бит 4
+        printf("Warning: Max retries reached, clearing buffers\r\n");
         nrf24_clear_max_rt();
         nrf24_flush_tx();
+        nrf24_flush_rx();  // Также очищаем RX буфер
       }
     }
     
@@ -114,18 +116,18 @@ void nrf_init_next(void)
 
 printf("NRF24 initialized\r\n");
   
-  // Настройка NRF24 как приемника
-  nrf24_auto_ack_all(auto_ack);
-  nrf24_en_ack_pld(enable);
+  // Настройка NRF24 как приемника с улучшенной надежностью
+  nrf24_auto_ack_all(auto_ack);  // Включаем автоподтверждения
+  nrf24_en_ack_pld(disable);
   nrf24_en_dyn_ack(disable);
   nrf24_dpl(disable);
   
-  // Use CRC configuration
-  nrf24_set_crc(no_crc, _1byte);  // Отключаем CRC, устанавливаем 1 байт
-  nrf24_tx_pwr(_0dbm);
-  nrf24_data_rate(_1mbps);  // Синхронизируем с передатчиком
-  nrf24_set_channel(90);    // Синхронизируем с передатчиком
-  nrf24_set_addr_width(5);
+  // Включаем 2-байтовый CRC для лучшего обнаружения ошибок
+  nrf24_set_crc(1, 0);  // 2-байтовый CRC для лучшей надежности
+  nrf24_tx_pwr(_0dbm);           // Максимальная мощность передачи
+  nrf24_data_rate(_250kbps);     // Низкая скорость для лучшей чувствительности
+  nrf24_set_channel(76);         // Канал 76 (2.476 ГГц) - менее загружен WiFi
+  nrf24_set_addr_width(5);       // 5-байтовый адрес
   
   // Отключение динамических пакетов для всех каналов
   nrf24_set_rx_dpl(0, disable);
@@ -137,19 +139,29 @@ printf("NRF24 initialized\r\n");
   
   nrf24_pipe_pld_size(0, PLD_S);
   
-  nrf24_auto_retr_delay(7);  // Задержка авто-повторов 750 мкс
-  nrf24_auto_retr_limit(10);
+  // Увеличиваем задержку и количество повторов для надежности
+  nrf24_auto_retr_delay(15);     // Задержка 4000 мкс (максимальная)
+  nrf24_auto_retr_limit(15);     // 15 повторов (максимальное значение)
   
   nrf24_open_tx_pipe(tx_addr);
   nrf24_open_rx_pipe(0, tx_addr);
   
+  // Очищаем буферы перед началом работы
+  nrf24_flush_tx();
+  nrf24_flush_rx();
+  
+  // Очищаем все флаги состояния
+  nrf24_clear_rx_dr();
+  nrf24_clear_tx_ds();
+  nrf24_clear_max_rt();
+  
   nrf24_listen();  // Включаем режим приема
   ce_high();
   
-  printf("NRF24 configured as receiver on channel 90\r\n");
+  printf("NRF24 configured as receiver on channel 76\r\n");
   printf("Address: 0x%02X%02X%02X%02X%02X\r\n", 
          tx_addr[0], tx_addr[1], tx_addr[2], tx_addr[3], tx_addr[4]);
-  printf("Data rate: 1 Mbps, Payload size: %d bytes\r\n", PLD_S);
+  printf("Data rate: 250 kbps, Payload size: %d bytes\r\n", PLD_S);
 
 
 
