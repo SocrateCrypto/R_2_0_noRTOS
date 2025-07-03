@@ -27,6 +27,7 @@
 #include "MksServo/Motor_position_state_structure.h"
 #include "Buttons/buttons.h"
 #include "NRF/nrf.h"
+#include "EEPROM/flash_storage.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -144,6 +145,35 @@ int main(void)
   printf("NRF24 RX Test Started\r\n");
   printf("UART1 printf redirection working!\r\n");
   
+  // Инициализация Flash памяти
+  printf("Initializing Flash storage...\r\n");
+  if (FlashStorage_Init() == HAL_OK) {
+    printf("Flash storage initialized successfully\r\n");
+    
+    // Выводим информацию о сохраненном адресе пульта
+    FlashStorage_PrintStoredAddress();
+    
+    // Если есть сохраненный адрес пульта, загружаем его в NRF24
+    if (FlashStorage_HasValidRemoteAddress()) {
+      uint8_t stored_address[5];
+      if (FlashStorage_LoadRemoteAddress(stored_address) == HAL_OK) {
+        printf("[NRF] Loading stored remote address for NRF24: 0x%02X%02X%02X%02X%02X\r\n",
+               stored_address[0], stored_address[1], stored_address[2], stored_address[3], stored_address[4]);
+        // Устанавливаем загруженный адрес как рабочий для NRF24
+        nrf_set_working_address(stored_address);
+      }
+    } else {
+      printf("[NRF] No remote address stored, device needs pairing\r\n");
+      
+      // ВРЕМЕННО: очищаем Flash при обнаружении некорректных данных
+      // Это нужно для перехода на новый алгоритм контрольной суммы
+      printf("[NRF] Clearing Flash due to checksum algorithm update...\r\n");
+      FlashStorage_ForceErase();
+    }
+  } else {
+    printf("Flash storage initialization failed\r\n");
+  }
+  
   // Инициализация NRF24
   ce_low();  // Сначала CE в LOW
   HAL_Delay(100);  // Увеличиваем задержку для стабилизации
@@ -161,6 +191,14 @@ int main(void)
   HAL_Delay(3000); // Пауза после инициализации
   MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
   MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
+  
+  // Устанавливаем режим работы сервопривода по умолчанию
+  uint8_t servo_mode = 4; // Режим по умолчанию 
+  if (MksServo_SetWorkMode(&mksServo, servo_mode)) {
+    printf("[MKS] Work mode set to default: %d\r\n", servo_mode);
+  } else {
+    printf("[MKS] Failed to set work mode\r\n");
+  }
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -187,7 +225,7 @@ int main(void)
         uint16_t value = 0;
         flag_first_run = true;
         MksServo_GetCarry(&mksServo, &carry, &value, 100); // Флаг для первого запуска
-        MksServo_SpeedModeRun(&mksServo, 0x01, 1500, 200); //
+        MksServo_SpeedModeRun(&mksServo, 0x01, 500, 250); //
 
         printf("[MKS] Servo running left\r\n");
       }
@@ -195,7 +233,7 @@ int main(void)
       {
 
         flag_first_run = true;                             // Флаг для первого запуска
-        MksServo_SpeedModeRun(&mksServo, 0x00, 1500, 200); //
+        MksServo_SpeedModeRun(&mksServo, 0x00, 500, 250); //
 
         printf("[MKS] Servo running right\r\n");
       }

@@ -77,6 +77,44 @@ uint8_t MksServo_SetMicrostep(MksServo_t *servo, uint8_t microstep)
     return 1;
 }
 
+/**
+ * @brief Установка режима работы сервопривода
+ * @param servo указатель на структуру MksServo_t
+ * @param mode режим работы (0-5):
+ *             0 = CR_OPEN, 1 = CR_CLOSE, 2 = CR_vFOC
+ *             3 = SR_OPEN, 4 = SR_CLOSE, 5 = SR_vFOC
+ * @retval 1 если успешно, 0 если ошибка
+ */
+uint8_t MksServo_SetWorkMode(MksServo_t *servo, uint8_t mode)
+{
+    if (mode > 5) {
+        printf("[MKS] Error: Invalid work mode %d (must be 0-5)\r\n", mode);
+        return 0;
+    }
+    
+    uint8_t tx[5];
+    tx[0] = 0xFA;                        // Head
+    tx[1] = servo->device_address;       // Slave addr
+    tx[2] = 0x82;                        // Function (Set work mode)
+    tx[3] = mode;                        // Data (mode 0-5)
+    tx[4] = MksServo_GetCheckSum(tx, 4); // CRC
+    
+    printf("[MKS] Setting work mode to %d\r\n", mode);
+    
+    // Включаем передачу RS485
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    
+    // Отправляем команду
+    HAL_UART_Transmit(servo->huart, tx, 5, 100);
+    
+    // Выключаем передачу RS485
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+    
+    // Ждем ответ от сервопривода (FB 01 82 status CRC)
+    return MksServo_WaitForACK(servo, 5, 1000);
+}
+
 uint8_t MksServo_Calibrate(MksServo_t *servo, uint32_t timeout_ms)
 {
     uint8_t tx[5];

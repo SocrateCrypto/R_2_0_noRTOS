@@ -1,5 +1,6 @@
 #include "nrf.h"
 #include "main.h"
+#include "EEPROM/flash_storage.h"
 
 #include "NRF/NRF24_conf.h"
 #include "NRF/NRF24_reg_addresses.h"
@@ -150,20 +151,31 @@ static void process_bind_packet(const uint8_t* data) {
     // Копируем новый адрес в рабочий адрес
     memcpy(tx_addr, bind_packet->remote_address, 5);
     
+    // Сохраняем адрес пульта в Flash память
+    if (FlashStorage_SaveRemoteAddress(bind_packet->remote_address) == HAL_OK) {
+        printf("[FLASH] Remote address saved successfully\r\n");
+    } else {
+        printf("[FLASH] Failed to save remote address\r\n");
+    }
+    
     printf("Binding successful! New working address set.\r\n");
     printf("New address: 0x%02X%02X%02X%02X%02X\r\n",
            tx_addr[0], tx_addr[1], tx_addr[2], tx_addr[3], tx_addr[4]);
     
-    // Мигаем лампочкой LAMP 5 раз с периодом 0.25 сек
-    for (int i = 0; i < 10; i++) {
-        HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET);
-        HAL_Delay(250);
-        HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET);
-        HAL_Delay(250);
-    }
-    
     // Отправляем ответ BIND_OK (пока еще на bind адресе)
     nrf_send_bind_response();
+    
+    // Мигаем лампочкой LAMP 10 раз с коротким периодом
+    printf("Starting LAMP blinking sequence...\r\n");
+    for (int i = 0; i < 10; i++) {
+        HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET);
+        HAL_Delay(100);  // Короткая вспышка 100мс
+        HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET);
+        HAL_Delay(100);  // Короткая пауза 100мс
+    }
+    printf("LAMP blinking sequence completed!\r\n");
+    
+    
     
     printf("*** BINDING COMPLETE! ***\r\n");
     
@@ -194,7 +206,7 @@ static void process_bind_packet(const uint8_t* data) {
     binding_mode = 0;
     printf("Automatically exiting binding mode after successful binding\r\n");
     
-    // TODO: Здесь позже добавим сохранение в FLASH память
+    // Адрес пульта уже сохранен в Flash память выше
     
     processed_data++; // Увеличиваем счетчик обработанных пакетов
 }
@@ -483,4 +495,13 @@ void nrf_exit_binding_mode(void) {
 // Функция проверки, находимся ли в режиме привязки
 uint8_t nrf_is_binding_mode(void) {
     return binding_mode;
+}
+
+// Функция для установки рабочего адреса NRF24
+void nrf_set_working_address(const uint8_t address[5]) {
+    // Копируем новый адрес в рабочий адрес
+    memcpy(tx_addr, address, 5);
+    
+    printf("[NRF] Working address set to: 0x%02X%02X%02X%02X%02X\r\n",
+           tx_addr[0], tx_addr[1], tx_addr[2], tx_addr[3], tx_addr[4]);
 }

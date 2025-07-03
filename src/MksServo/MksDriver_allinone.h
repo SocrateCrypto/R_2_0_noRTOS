@@ -8,6 +8,14 @@
 #define MKS_SERVO_RX_BUF_SIZE 128
 #define MKS_SERVO_STEPS_PER_REV 122880 // Количество шагов на оборот (уточните при необходимости)
 
+// Режимы работы сервопривода (для MksServo_SetWorkMode)
+#define MKS_SERVO_MODE_CR_OPEN  0  // Pulse interface, 400 RPM, fixed current
+#define MKS_SERVO_MODE_CR_CLOSE 1  // Pulse interface, 1500 RPM, fixed current  
+#define MKS_SERVO_MODE_CR_vFOC  2  // Pulse interface, 3000 RPM, self-adaption current
+#define MKS_SERVO_MODE_SR_OPEN  3  // Serial interface, 400 RPM, fixed current
+#define MKS_SERVO_MODE_SR_CLOSE 4  // Serial interface, 1500 RPM, fixed current
+#define MKS_SERVO_MODE_SR_vFOC  5  // Serial interface, 3000 RPM, self-adaption current
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,6 +59,7 @@ uint8_t MksServo_GetCheckSum(uint8_t *buffer, uint8_t len);
 int     MksServo_RxGetByte(MksServo_t *servo, uint8_t *data);
 void    MksServo_UpdateStateFromACK(MksServo_t *servo, const uint8_t *ack, uint8_t len);
 uint8_t MksServo_SetMicrostep(MksServo_t *servo, uint8_t microstep);
+uint8_t MksServo_SetWorkMode(MksServo_t *servo, uint8_t mode);
 uint8_t MksServo_ReadStatus(MksServo_t *servo, uint32_t timeout_ms);
 uint8_t MksServo_ReadPositionError(MksServo_t *servo, int32_t *error, uint32_t timeout_ms);
 uint8_t MksServo_Calibrate(MksServo_t *servo, uint32_t timeout_ms);

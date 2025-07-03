@@ -24,3 +24,6 @@ void nrf_enter_binding_mode(void);
 void nrf_exit_binding_mode(void);
 uint8_t nrf_is_binding_mode(void);
 void nrf_send_bind_response(void);
+
+// Функции для работы с адресом пульта
+void nrf_set_working_address(const uint8_t address[5]);
