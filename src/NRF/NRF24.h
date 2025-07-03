@@ -53,6 +53,7 @@ void nrf24_set_crc(uint8_t en_crc_value, uint8_t crc_bytes);
 void nrf24_tx_pwr(uint8_t pwr);
 void nrf24_data_rate(uint8_t rate);
 void nrf24_set_channel(uint8_t ch);
+uint8_t nrf24_get_channel(void);
 void nrf24_set_addr_width(uint8_t width);
 void nrf24_set_rx_dpl(uint8_t pipe, uint8_t en);
 void nrf24_pipe_pld_size(uint8_t pipe, uint8_t size);

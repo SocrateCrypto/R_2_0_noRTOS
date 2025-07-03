@@ -18,3 +18,9 @@ extern RadioButtons RadioButtonsStates;
 void nrf_loop(uint8_t irq);
 void nrf_init_next(void);
 void update_radio_buttons(const char* data);
+
+// Функции привязки
+void nrf_enter_binding_mode(void);
+void nrf_exit_binding_mode(void);
+uint8_t nrf_is_binding_mode(void);
+void nrf_send_bind_response(void);

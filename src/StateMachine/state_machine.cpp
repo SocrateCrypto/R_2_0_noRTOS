@@ -5,6 +5,7 @@
 #include "../Buttons/buttons.h"
 #include "Potentiometr\Potentiometer.h"
 #include "MksServo/MksDriver_allinone.h"
+#include "NRF/nrf.h" // Добавляем для функций привязки
 #include <stdio.h>
 
 StateMachine::StateMachine() : currentState(State::Initial) {}
@@ -55,6 +56,7 @@ void StateMachine_loop(void)
             {
                 stateMachine.setState(State::CalibrateAndBind);
                 printf("[FSM] -> CalibrateAndBind\n");
+                nrf_enter_binding_mode(); // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
         }
@@ -65,6 +67,7 @@ void StateMachine_loop(void)
             {
                 stateMachine.setState(State::BindMode);
                 printf("[FSM] -> BindMode\n");
+                nrf_enter_binding_mode(); // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
         }
@@ -100,6 +103,11 @@ void StateMachine_loop(void)
             buttonsState.gyro == BUTTON_ON &&
             (stateMachine.is(State::Calibrate) || stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)))
         {
+            // Если выходим из режимов с привязкой - отключаем режим привязки
+            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)) {
+                nrf_exit_binding_mode(); // Выходим из режима привязки NRF
+            }
+            
             stateMachine.setState(State::GiroScope);
             printf("[FSM] -> GiroScope (after Calibrate/Bind)\n");
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET); // Выключить лампочку
@@ -122,6 +130,11 @@ void StateMachine_loop(void)
             buttonsState.turn_left == BUTTON_OFF &&
             buttonsState.turn_right == BUTTON_OFF)
         {
+            // Если выходим из режимов с привязкой - отключаем режим привязки
+            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)) {
+                nrf_exit_binding_mode(); // Выходим из режима привязки NRF
+            }
+            
             stateMachine.setState(State::Initial);
             printf("[FSM] -> Initial (from Bind/Calibrate)\n");
         }

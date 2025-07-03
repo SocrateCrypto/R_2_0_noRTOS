@@ -117,6 +117,10 @@ void nrf24_set_channel(uint8_t ch){
 	nrf24_w_reg(RF_CH, &ch, 1);
 }
 
+uint8_t nrf24_get_channel(void){
+	return nrf24_r_reg(RF_CH, 1);
+}
+
 void nrf24_open_tx_pipe(uint8_t *addr){
 	nrf24_w_reg(TX_ADDR, addr, 5);
 }
