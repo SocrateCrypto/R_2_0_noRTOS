@@ -170,6 +170,7 @@ static void process_bind_packet(const uint8_t* data) {
     for (int i = 0; i < 10; i++) {
         HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET);
         HAL_Delay(100);  // Короткая вспышка 100мс
+        nrf_send_bind_response();
         HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET);
         HAL_Delay(100);  // Короткая пауза 100мс
     }
@@ -335,6 +336,11 @@ void nrf_loop(uint8_t irq)
               process_bind_packet(dataR);
           } else {
               printf("Non-bind packet in binding mode (type=0x%02X), ignoring\r\n", dataR[0]);
+              
+              // Очищаем буферы от "мусорных" пакетов в режиме биндинга
+              nrf24_flush_rx();
+              nrf24_clear_rx_dr();
+              printf("RX buffers cleared due to non-bind packet in binding mode\r\n");
           }
       } else {
          // printf("Processing in NORMAL MODE\r\n");
