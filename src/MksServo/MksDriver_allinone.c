@@ -379,6 +379,48 @@ uint8_t MksServo_PositionMode2Run(MksServo_t *servo, int32_t rel_steps, uint16_t
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
     return 1;
 }
+uint8_t MksServo_CurrentAxisToZero_92(MksServo_t *servo)
+{
+uint8_t tx[5];
+    tx[0] = 0xFA; // Head
+    tx[1] = servo->device_address; // Slave addr
+    tx[2] = 0x92; // Function (Current axis to zero)
+    tx[3] = 0x00; // Data (not used)
+    
+    tx[4] = MksServo_GetCheckSum(tx, 4); // CRC (XOR)
+
+    // Включаем DERE для передачи
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 5, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+
+    return 1;
+
+}
+
+uint8_t MksServo_AbsoluteMotionByPulse_FE(MksServo_t *servo, uint16_t speed, uint8_t acc, int32_t absPulses)
+{
+    uint8_t tx[11];
+    tx[0] = 0xFA;
+    tx[1] = servo->device_address;
+    tx[2] = 0xFE;
+    tx[3] = (speed >> 8) & 0xFF;         // speed high byte
+    tx[4] = speed & 0xFF;                // speed low byte
+    tx[5] = acc;
+    tx[6] = (absPulses >> 24) & 0xFF;    // absPulses high byte
+    tx[7] = (absPulses >> 16) & 0xFF;
+    tx[8] = (absPulses >> 8) & 0xFF;
+    tx[9] = absPulses & 0xFF;            // absPulses low byte
+    tx[10] = MksServo_GetCheckSum(tx, 10);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 11, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+    return 1;
+}
+
+
 void PollPositionErrorTask(void)
 {
     uint32_t now = HAL_GetTick();
@@ -563,6 +605,11 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
         }
     }
     printf("[MKS] Encoder addition value read timeout or CRC error\r\n");
+    return 0;
+}
+
+uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms)
+{
     return 0;
 }
 

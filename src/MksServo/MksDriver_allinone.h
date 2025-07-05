@@ -79,6 +79,9 @@ void MksServo_EmergencyStop_Simple(MksServo_t *servo);
 // --- ENCODER READOUT ---
 uint8_t MksServo_GetCarry(MksServo_t *servo, int32_t *carry, uint16_t *value, uint32_t timeout_ms);
 uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms);
+uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms);
+uint8_t MksServo_AbsoluteMotionByPulse_FE(MksServo_t *servo, uint16_t speed, uint8_t acc, int32_t rel_steps );
+uint8_t MksServo_CurrentAxisToZero_92(MksServo_t *servo);
 #ifdef __cplusplus
 }
 #endif

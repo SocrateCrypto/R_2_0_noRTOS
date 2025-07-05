@@ -203,6 +203,7 @@ void StateMachine_loop(void)
                 stateMachine.setState(State::Scan);
                 flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
                 debounce_timer = HAL_GetTick();
+                MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
