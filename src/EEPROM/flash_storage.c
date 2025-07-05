@@ -53,6 +53,12 @@ uint32_t FlashStorage_CalculateChecksum(const FlashStorage_t* data)
         checksum += count_ptr[i];
     }
     
+    // Oscillation angle (2 bytes)
+    const uint8_t* angle_ptr = (const uint8_t*)&data->oscillation_angle;
+    for (size_t i = 0; i < sizeof(data->oscillation_angle); i++) {
+        checksum += angle_ptr[i];
+    }
+    
     // Reserved bytes
     for (size_t i = 0; i < sizeof(data->reserved); i++) {
         checksum += data->reserved[i];
@@ -81,6 +87,9 @@ void FlashStorage_SetDefaultValues(FlashStorage_t* data)
     // Инициализируем счетчики
     data->binding_count = 0;
     data->last_binding_time = 0;
+    
+    // Устанавливаем угол размаха по умолчанию
+    data->oscillation_angle = 180;  // Значение по умолчанию: 180 шагов
     
     // Очищаем резерв
     memset(data->reserved, 0, sizeof(data->reserved));
@@ -360,6 +369,7 @@ void FlashStorage_DebugDumpFlash(void) {
            flash_ptr->remote_address[4]);
     printf("[FLASH] Binding count: %u\r\n", (unsigned int)flash_ptr->binding_count);
     printf("[FLASH] Last binding time: %u\r\n", (unsigned int)flash_ptr->last_binding_time);
+    printf("[FLASH] Oscillation angle: %d steps\r\n", flash_ptr->oscillation_angle);
     printf("[FLASH] Stored checksum: 0x%08X\r\n", (unsigned int)flash_ptr->checksum);
     printf("[FLASH] Structure size: %u bytes\r\n", (unsigned int)sizeof(FlashStorage_t));
     printf("[FLASH] === END DUMP ===\r\n");
@@ -385,4 +395,51 @@ HAL_StatusTypeDef FlashStorage_ForceErase(void) {
     }
     
     return status;
+}
+
+/**
+ * @brief Сохранение угла размаха мотора в Flash память
+ * @param angle угол размаха в шагах
+ * @retval HAL_OK если успешно
+ */
+HAL_StatusTypeDef FlashStorage_SaveOscillationAngle(int16_t angle) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    
+    // Обновляем угол размаха в кэше
+    flash_data_cache.oscillation_angle = angle;
+    
+    // Пересчитываем контрольную сумму с новым углом
+    flash_data_cache.checksum = FlashStorage_CalculateChecksum(&flash_data_cache);
+    
+    printf("[Flash] Saving oscillation angle: %d steps\r\n", angle);
+    
+    // Сохраняем в Flash
+    return FlashStorage_SaveData(&flash_data_cache);
+}
+
+/**
+ * @brief Загрузка угла размаха мотора из Flash памяти
+ * @param angle указатель на переменную для загрузки угла
+ * @retval HAL_OK если успешно
+ */
+HAL_StatusTypeDef FlashStorage_LoadOscillationAngle(int16_t* angle) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    
+    if (angle == NULL) {
+        return HAL_ERROR;
+    }
+    
+    *angle = flash_data_cache.oscillation_angle;
+    
+    printf("[Flash] Loaded oscillation angle: %d steps\r\n", *angle);
+    
+    return HAL_OK;
 }

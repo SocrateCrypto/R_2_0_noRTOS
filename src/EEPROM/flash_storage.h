@@ -22,8 +22,9 @@ typedef struct __attribute__((packed)) {
     uint8_t remote_address[5];         // Адрес пульта NRF24L01 (радио педалей)
     uint32_t binding_count;            // Счетчик привязок (для отладки)
     uint32_t last_binding_time;        // Время последней привязки
+    int16_t oscillation_angle;         // Угол размаха поворота мотора (в шагах)
     uint32_t checksum;                 // Контрольная сумма
-    uint8_t reserved[32];              // Резерв для будущих параметров
+    uint8_t reserved[30];              // Резерв для будущих параметров (уменьшен на 2 байта)
 } FlashStorage_t;
 
 // Функции для работы с Flash памятью
@@ -42,6 +43,10 @@ HAL_StatusTypeDef FlashStorage_SaveRemoteAddress(const uint8_t address[5]);
 HAL_StatusTypeDef FlashStorage_LoadRemoteAddress(uint8_t address[5]);
 bool FlashStorage_HasValidRemoteAddress(void);
 void FlashStorage_PrintStoredAddress(void);
+
+// Функции для работы с углом размаха мотора
+HAL_StatusTypeDef FlashStorage_SaveOscillationAngle(int16_t angle);
+HAL_StatusTypeDef FlashStorage_LoadOscillationAngle(int16_t* angle);
 
 // Отладочные функции
 void FlashStorage_DebugDumpFlash(void);

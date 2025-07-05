@@ -4,6 +4,7 @@
 #include "stm32f1xx_hal.h"
 #include <stdint.h>
 #include <stdlib.h> // Для abs()
+#include "../../include/fd_status.h" // Подключаем fd_status.h
 
 #define MKS_SERVO_RX_BUF_SIZE 128
 #define MKS_SERVO_STEPS_PER_REV 122880 // Количество шагов на оборот (уточните при необходимости)
@@ -65,6 +66,7 @@ uint8_t MksServo_ReadPositionError(MksServo_t *servo, int32_t *error, uint32_t t
 uint8_t MksServo_Calibrate(MksServo_t *servo, uint32_t timeout_ms);
 uint8_t MksServo_MoveSteps(MksServo_t *servo, uint8_t dir, uint32_t steps, uint8_t acc);
 uint8_t MksServo_MoveDegrees(MksServo_t *servo, float degrees, uint8_t acc);
+void    MksServo_SendRaw(MksServo_t *servo, const uint8_t *data, uint16_t len);
 // --- DEBUG ---
 uint8_t MksServo_ReadResponse(MksServo_t *servo, uint8_t *rx, uint8_t rx_len, uint32_t timeout_ms);
 // --- POSITION ---

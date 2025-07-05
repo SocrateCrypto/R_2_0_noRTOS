@@ -19,8 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "StateMachine/state_machine.h"
 #include <string.h>
+#include <math.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "MksServo/MksDriver_allinone.h"
@@ -28,8 +30,11 @@
 #include "Buttons/buttons.h"
 #include "NRF/nrf.h"
 #include "EEPROM/flash_storage.h"
+#include "UserConfig/user_config.h"
+#include "fd_status.h"
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include "NRF/NRF24.h"
@@ -37,11 +42,19 @@ extern "C" {
 #include "NRF/NRF24_reg_addresses.h"
 #include "NRF/nrf.h"
 
-// Объявление внешней переменной irq
-extern volatile uint8_t irq;
+  // Объявление внешней переменной irq
+  extern volatile uint8_t irq;
+
+  // Прототип фонового парсера UART3 для вывода только 5-байтовых пакетов статуса
+  // ВАЖНО: Не включайте этот прототип в main.h, чтобы избежать ошибок компиляции в других C-файлах!
+  void MksServo_BackgroundPacketDebug(MksServo_t *servo);
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifndef isfinite
+#define isfinite(x) ((x) == (x) && (x) != INFINITY && (x) != -INFINITY)
 #endif
 
 /* USER CODE END Includes */
@@ -79,12 +92,18 @@ uint8_t uart3_rx_byte;
 MksServo_t mksServo;
 
 // Определяем переменные для NRF24
-#define PLD_S 32 //payload size should be equal to transmitter
+#define PLD_S 32 // payload size should be equal to transmitter
 
 // Флаг для включения подробного режима отладки (закомментировать для отключения)
-//#define VERBOSE_DEBUG
+// #define VERBOSE_DEBUG
 
-
+// Определение типа состояния сканирования для режима Scan
+typedef enum
+{
+  SCAN_INIT,        // Инициализация
+  SCAN_MOVING_LEFT, // Движение влево (-angle/2)
+  SCAN_MOVING_RIGHT // Движение вправо (+angle/2)
+} ScanState;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
@@ -101,7 +120,43 @@ static void MX_SPI2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+FD_status_t last_fd_status = {0};
+int last_fd_status_printed = -1; // Для контроля вывода смены статуса
+#define CMD_CRC_HISTORY 3
+uint8_t last_cmd_crc_history[CMD_CRC_HISTORY] = {0};
+uint8_t last_cmd_crc_index = 0;
+// Глобальная переменная для CRC последней отправленной команды (движение/стоп)
+uint8_t last_cmd_crc = 0;
+// Флаг для Scan-режима: разрешено ли отправлять команду движения
+int scan_ready_to_move = 1;
+// Глобальная переменная для угла сканирования
+int angle_of_scan = 180;
+// Глобальный флаг успешного обнуления координат
+int scan_zeroing_done = 0;
+// Глобальная переменная для передаточного числа редуктора (можно менять)
+float gear_ratio = 19.2f;
 
+// --- Новая функция пересчёта угла в шаги с учётом редуктора и микрошагов ---
+// steps_per_rev = 200 (шагов на оборот двигателя)
+// microsteps = 32 (микрошагов)
+// gear_ratio = 19.2 (редуктор)
+// steps_for_360 = 200 * 32 * 19.2 = 122880
+int32_t angle_to_steps(float angle_deg) {
+    const float steps_per_rev = 200.0f;
+    const float microsteps = 32.0f;
+    const float gear_ratio = 19.2f;
+    const float steps_for_360 = steps_per_rev * microsteps * gear_ratio;
+    return (int32_t)(steps_for_360 * angle_deg / 360.0f);
+}
+
+// --- Функция вычисления CRC для команд SERVO42D/57D (сумма всех байт кроме CRC) ---
+uint8_t calc_crc(const uint8_t *data, size_t len) {
+    uint8_t crc = 0;
+    for (size_t i = 0; i < len - 1; ++i) {
+        crc += data[i];
+    }
+    return crc;
+}
 /* USER CODE END 0 */
 
 /**
@@ -144,114 +199,176 @@ int main(void)
 
   printf("NRF24 RX Test Started\r\n");
   printf("UART1 printf redirection working!\r\n");
-  
+
   // Инициализация Flash памяти
   printf("Initializing Flash storage...\r\n");
-  if (FlashStorage_Init() == HAL_OK) {
+  if (FlashStorage_Init() == HAL_OK)
+  {
     printf("Flash storage initialized successfully\r\n");
-    
+
     // Выводим информацию о сохраненном адресе пульта
     FlashStorage_PrintStoredAddress();
-    
+
     // Если есть сохраненный адрес пульта, загружаем его в NRF24
-    if (FlashStorage_HasValidRemoteAddress()) {
+    if (FlashStorage_HasValidRemoteAddress())
+    {
       uint8_t stored_address[5];
-      if (FlashStorage_LoadRemoteAddress(stored_address) == HAL_OK) {
+      if (FlashStorage_LoadRemoteAddress(stored_address) == HAL_OK)
+      {
         printf("[NRF] Loading stored remote address for NRF24: 0x%02X%02X%02X%02X%02X\r\n",
                stored_address[0], stored_address[1], stored_address[2], stored_address[3], stored_address[4]);
         // Устанавливаем загруженный адрес как рабочий для NRF24
         nrf_set_working_address(stored_address);
       }
-    } else {
+    }
+    else
+    {
       printf("[NRF] No remote address stored, device needs pairing\r\n");
-      
+
       // ВРЕМЕННО: очищаем Flash при обнаружении некорректных данных
       // Это нужно для перехода на новый алгоритм контрольной суммы
       printf("[NRF] Clearing Flash due to checksum algorithm update...\r\n");
       FlashStorage_ForceErase();
     }
-  } else {
+  }
+  else
+  {
     printf("Flash storage initialization failed\r\n");
   }
-  
+
   // Инициализация NRF24
-  ce_low();  // Сначала CE в LOW
-  HAL_Delay(100);  // Увеличиваем задержку для стабилизации
-  csn_high();  // Затем CSN в HIGH
-  HAL_Delay(100);  // Еще подождем
-  
+  ce_low();       // Сначала CE в LOW
+  HAL_Delay(100); // Увеличиваем задержку для стабилизации
+  csn_high();     // Затем CSN в HIGH
+  HAL_Delay(100); // Еще подождем
+
   nrf24_init();
   nrf_init_next(); // Инициализация NRF24 с передачей irq
-  
+
   // Тест UART
-  printf("UART1 Test: Hello World!\r\n");
+
   printf("UART1 Printf Test: %d\r\n", 123);
   setvbuf(stdout, NULL, _IONBF, 0); // Отключить буферизацию
   /* USER CODE END 2 */
-  HAL_Delay(3000); // Пауза после инициализации
+  HAL_Delay(1000); // Пауза после инициализации
   MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
   MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
-  
+
   // Устанавливаем режим работы сервопривода по умолчанию
-  uint8_t servo_mode = 4; // Режим по умолчанию 
-  if (MksServo_SetWorkMode(&mksServo, servo_mode)) {
+  uint8_t servo_mode = 4; // Режим SR _CLOSE
+  if (MksServo_SetWorkMode(&mksServo, servo_mode))
+  {
     printf("[MKS] Work mode set to default: %d\r\n", servo_mode);
-  } else {
+  }
+  else
+  {
     printf("[MKS] Failed to set work mode\r\n");
   }
+  Motor motor; // Инициализация глобальной переменной motor
 
+  // Инициализируем значения по умолчанию
+  motor.oscillation_angle = 180; // Значение по умолчанию на случай ошибки загрузки
+
+  // Загружаем угол размаха из Flash памяти
+  int16_t motor_angle;
+  if (FlashStorage_LoadOscillationAngle(&motor_angle) == HAL_OK)
+  {
+    motor.oscillation_angle = motor_angle;
+    printf("Motor angle loaded from Flash: %d steps\r\n", motor.oscillation_angle);
+  }
+  else
+  {
+    printf("Failed to load motor angle from Flash, using default: %d steps\r\n", motor.oscillation_angle);
+  }
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  State prev_state_for_scan = State::Initial;
   while (1)
   {
-    
-    nrf_loop( irq);
-    
+
+    nrf_loop(irq);
+    MksServo_BackgroundPacketDebug(&mksServo); // Фоновый парсер UART3
+
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
-    static bool flag_first_run = false; // Флаг для первого запуска педали
+    static bool flag_first_run = false;           // Флаг для первого запуска педали
+
+    State current_state = stateMachine.getState();
+
     StateMachine_loop();
+
     // Условный выбор действий по текущему состоянию
-    switch (stateMachine.getState())
+    switch (current_state)
     {
     case State::Initial:
       // TODO: действия для Initial
       break;
     case State::Manual:
       // TODO: действия для Manual
-      if (buttonsState.turn_left == BUTTON_ON && !flag_first_run) // Если педаль нажата
       {
         int32_t carry = 0;
         uint16_t value = 0;
-        flag_first_run = true;
-        MksServo_GetCarry(&mksServo, &carry, &value, 100); // Флаг для первого запуска
-        MksServo_SpeedModeRun(&mksServo, 0x01, 500, 250); //
-
-        printf("[MKS] Servo running left\r\n");
-      }
-      else if (buttonsState.turn_right == BUTTON_ON && !flag_first_run) // Если педаль нажата
-      {
-
-        flag_first_run = true;                             // Флаг для первого запуска
-        MksServo_SpeedModeRun(&mksServo, 0x00, 500, 250); //
-
-        printf("[MKS] Servo running right\r\n");
-      }
-      if (buttonsState.turn_right == BUTTON_OFF && buttonsState.turn_left == BUTTON_OFF && flag_first_run)
-      {
-        flag_first_run = false; // Сброс флага после отпускания педалей
-
-        MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                                                      // MksServo_EmergencyStop_Simple(&mksServo);
-        printf("[MKS] Servo stopped\r\n");
+        if (buttonsState.turn_left == BUTTON_ON && !flag_first_run) // Если педаль нажата
+        {
+          flag_first_run = true;
+          MksServo_GetCarry(&mksServo, &carry, &value, 100); // Флаг для первого запуска
+          MksServo_SpeedModeRun(&mksServo, 0x01, 500, 250);  //
+          printf("[MKS] Servo running left\r\n");
+        }
+        else if (buttonsState.turn_right == BUTTON_ON && !flag_first_run) // Если педаль нажата
+        {
+          flag_first_run = true;                            // Флаг для первого запуска
+          MksServo_SpeedModeRun(&mksServo, 0x00, 500, 250); //
+          printf("[MKS] Servo running right\r\n");
+        }
+        if (buttonsState.turn_right == BUTTON_OFF && buttonsState.turn_left == BUTTON_OFF && flag_first_run)
+        {
+          flag_first_run = false;                       // Сброс флага после отпускания педалей
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+          printf("[MKS] Servo stopped\r\n");
+        }
       }
       break;
     case State::GiroScope:
 
       break;
-    case State::Scan:
-      // TODO: действия для Scan
+    case State::Scan: 
+    {
+      static int scan_direction = 1; // 1 = вправо, -1 = влево
+      static int scan_first_move = 1; // 1 = первый запуск, 0 = не первый
+      static int32_t scan_target_steps = 0;
+      // --- Сбросить переменные при входе в Scan ---
+      if (prev_state_for_scan != State::Scan) {
+        scan_direction = 1;
+        scan_first_move = 1;
+        scan_target_steps = 0;
+        scan_ready_to_move = 1;
+        prev_state_for_scan = State::Scan;
+      }
+      if (scan_ready_to_move) {
+        scan_ready_to_move = 0;
+        int32_t steps = 0;
+        if (scan_first_move) {
+          // Первый раз — вправо на половину размаха
+          steps = angle_to_steps(motor.oscillation_angle / 2.0f);
+          scan_first_move = 0;
+          scan_direction = 1;
+          printf("[SCAN] First move: RIGHT, angle=%.2f, steps=%ld\r\n", (double)(motor.oscillation_angle / 2.0f), (long)steps);
+        } else {
+          // Далее — в противоположную сторону на полный размах
+          scan_direction = -scan_direction;
+          steps = angle_to_steps(motor.oscillation_angle) * scan_direction;
+          printf("[SCAN] Next move: %s, angle=%.2f, steps=%ld\r\n", scan_direction > 0 ? "RIGHT" : "LEFT", (double)motor.oscillation_angle, (long)steps);
+        }
+        scan_target_steps += steps;
+        // Определяем направление для функции: 0 = вправо, 1 = влево
+        uint8_t dir = (scan_direction > 0) ? 0 : 1;
+        uint32_t pulses = (uint32_t)abs(steps);
+        MksServo_PositionMode1Run(&mksServo, dir, 500, 250, pulses);
+        printf("[SCAN] Command sent: dir=%u, pulses=%lu, target=%ld, delta=%ld\r\n", dir, pulses, (long)scan_target_steps, (long)steps);
+      }
       break;
+    }
     case State::BindMode:
       // TODO: действия для BindMode
       break;
@@ -265,6 +382,10 @@ int main(void)
     default:
       // TODO: обработка неизвестного состояния
       break;
+    }
+    // --- После switch-case: обновляем prev_state_for_scan ---
+    if (current_state != State::Scan) {
+      prev_state_for_scan = current_state;
     }
   }
   /* USER CODE END 3 */
@@ -702,3 +823,134 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
+// --- Фоновый парсер UART3 для вывода только 5-байтовых пакетов статуса и обработки 0x92 ---
+// Теперь парсер не использует CRC из ответа, а только last_cmd_crc, который обновляется при отправке команды
+#ifdef __cplusplus
+extern "C" {
+#endif
+State stateMachine_getState();
+#ifdef __cplusplus
+}
+#endif
+
+void MksServo_BackgroundPacketDebug(MksServo_t *servo) {
+    static uint8_t packet[16]; // запас по длине
+    static uint8_t idx = 0;
+    static uint8_t collecting = 0;
+    uint8_t byte;
+    extern int scan_ready_to_move; // флаг для Scan-режима
+    static int zeroing_success = 0; // 1 - успешно обнулили
+    while (MksServo_RxGetByte(servo, &byte)) {
+        printf("[UART3][RAW] RX byte: %02X\n", byte);
+        if (!collecting) {
+            if (byte == 0xFB) {
+                packet[0] = byte;
+                idx = 1;
+                collecting = 1;
+            }
+        } else {
+            packet[idx++] = byte;
+            if (idx == 3) {
+                // На третьем байте (packet[2]) определяем тип пакета
+                switch (packet[2]) {
+                    case 0xFD: // Статусный пакет
+                        // Ждем 5 байт
+                        break;
+                    case 0x92: // Ответ на Set Current Axis to Zero
+                        // Ждем 5 байт
+                        break;
+                    default:
+                        // Пока не поддерживаем другие типы
+                        collecting = 0;
+                        idx = 0;
+                        continue;
+                }
+            }
+            // Для статусного пакета: FB xx FD ... ...
+            if (packet[2] == 0xFD && idx == 5) {
+                // Заполняем структуру FD_status
+                FD_status_t fd;
+                fd.head = packet[0];
+                fd.addr = packet[1];
+                fd.func = packet[2];
+                fd.status = packet[3];
+                fd.crc = packet[4];
+                extern uint8_t last_cmd_crc;
+                if ((int)fd.status != last_fd_status_printed) {
+                    printf("[UART3][FD] status: %u - ", fd.status);
+                    if (last_cmd_crc == 0xFA) {
+                        printf("STOP (last_cmd_crc=0xFA)\n");
+                    } else {
+                        printf("RUN (last_cmd_crc=0x%02X)\n", last_cmd_crc);
+                    }
+                    switch (fd.status) {
+                        case 0: printf("stop the motor fail\n"); break;
+                        case 1: 
+                            if (last_cmd_crc == 0xFA) {
+                                printf("stop the motor starting...\n");
+                            } else {
+                                printf("run starting...\n");
+                            }
+                            break;
+                        case 2: 
+                            // --- Исправлено: разрешаем движение всегда при status==2 в Scan-режиме ---
+                            if (stateMachine_getState() == State::Scan) {
+                                scan_ready_to_move = 1;
+                                printf("[SCAN][FSM] scan_ready_to_move=1 (run complete)\n");
+                            }
+                            if (last_cmd_crc == 0xFA) {
+                                printf("stop the motor complete\n");
+                                scan_ready_to_move = 1; // разрешаем движение
+                            } else {
+                                printf("run complete\n");
+                            }
+                            break;
+                        default: printf("unknown status\n"); break;
+                    }
+                    last_fd_status_printed = fd.status;
+                }
+                last_fd_status = fd;
+                printf("[UART3][PKT] ");
+                for (int i = 0; i < 5; ++i) printf("%02X ", packet[i]);
+                printf("\n");
+                collecting = 0;
+                idx = 0;
+            }
+            // Для пакета 0x92: FB xx 92 status crc
+            if (packet[2] == 0x92 && idx == 5) {
+                uint8_t status = packet[3];
+                printf("[UART3][ZERO] status: %u - ", status);
+                if (status == 1) {
+                    printf("set success\n");
+                    zeroing_success = 1;
+                } else {
+                    printf("set fail\n");
+                }
+                printf("[UART3][PKT] ");
+                for (int i = 0; i < 5; ++i) printf("%02X ", packet[i]);
+                printf("\n");
+                collecting = 0;
+                idx = 0;
+            }
+        }
+    }
+    // Обновляем глобальный флаг успешного обнуления
+    if (zeroing_success) {
+        extern int scan_zeroing_done;
+        scan_zeroing_done = 1;
+        zeroing_success = 0;
+    }
+}
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+State stateMachine_getState() {
+    return stateMachine.getState();
+}
+#ifdef __cplusplus
+}
+#endif
+
+// --- Глобальная переменная для отслеживания предыдущего состояния Scan ---

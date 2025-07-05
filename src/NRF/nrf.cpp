@@ -56,7 +56,7 @@ static uint8_t binding_mode = 0;      // Флаг режима привязки
 static uint8_t bind_response_count = 0; // Счетчик отправленных BIND_OK ответов
 static uint32_t last_bind_packet_time = 0; // Время последнего bind-пакета
 #define MAX_BIND_RESPONSES 3          // Максимальное количество BIND_OK ответов
-#define BIND_PACKET_TIMEOUT 5000      // Таймаут для bind-пакетов (5 секунд)
+#define BIND_PACKET_TIMEOUT 1000      // Таймаут для bind-пакетов (5 секунд)
 
 // Функция обнуления всех кнопок
 static void reset_radio_buttons(void) {

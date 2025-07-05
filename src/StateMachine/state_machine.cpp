@@ -1,4 +1,4 @@
- #include "state_machine.h"
+#include "state_machine.h"
 #include "main.h" // Добавьте этот include ПЕРЕД другими
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_gpio.h"
@@ -8,11 +8,35 @@
 #include "NRF/nrf.h" // Добавляем для функций привязки
 #include <stdio.h>
 
-StateMachine::StateMachine() : currentState(State::Initial) {}
+StateMachine::StateMachine() : currentState(State::Initial), homeCarry(0), homeValue(0), homePositionSet(false) {}
 
 State StateMachine::getState() const { return currentState; }
 void StateMachine::setState(State newState) { currentState = newState; }
 bool StateMachine::is(State state) const { return currentState == state; }
+
+// Методы для работы с домашней позицией энкодера
+void StateMachine::setHomePosition(int32_t carry, uint16_t value) {
+    homeCarry = carry;
+    homeValue = value;
+    homePositionSet = true;
+    printf("[StateMachine] Home position set: carry=%ld, value=%d\r\n", (long)carry, value);
+}
+
+void StateMachine::getHomePosition(int32_t* carry, uint16_t* value) const {
+    if (carry) *carry = homeCarry;
+    if (value) *value = homeValue;
+}
+
+bool StateMachine::hasHomePosition() const {
+    return homePositionSet;
+}
+
+void StateMachine::clearHomePosition() {
+    homeCarry = 0;
+    homeValue = 0;
+    homePositionSet = false;
+    printf("[StateMachine] Home position cleared\r\n");
+}
 
 StateMachine stateMachine; // Экземпляр stateMachine
 // В начале файла (например, state_machine_task.cpp)
@@ -150,14 +174,43 @@ void StateMachine_loop(void)
                 !flag_blocked_for_debounce) // Проверяем флаг блокировки
             {
                  MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+                
+                // Сохраняем текущую позицию как домашнюю перед входом в Scan
+                int32_t carry = 0;
+                uint16_t value = 0;
+                
+                // Делаем несколько попыток чтения позиции
+                bool position_read = false;
+                for (int i = 0; i < 5; i++) {
+                    HAL_Delay(10); // Небольшая задержка между попытками
+                    if (MksServo_GetCarry(&mksServo, &carry, &value, 100)) {
+                        position_read = true;
+                        break;
+                    }
+                }
+                
+                if (position_read) {
+                    stateMachine.setHomePosition(carry, value);
+                    printf("[FSM] Home position saved: carry=%ld, value=%d\r\n", (long)carry, value);
+                } else {
+                    printf("[FSM] Failed to read position, using fallback!\r\n");
+                    // Используем последние известные значения (если есть)
+                    carry = 0;
+                    value = 0;
+                    stateMachine.setHomePosition(carry, value);
+                }
+                
                 stateMachine.setState(State::Scan);
                 flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
-               debounce_timer = HAL_GetTick();
+                debounce_timer = HAL_GetTick();
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
         if (stateMachine.is(State::Scan) && !flag_blocked_for_debounce && (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
         {
+            // Очищаем домашнюю позицию при выходе из Scan
+           // stateMachine.clearHomePosition();
+            
             stateMachine.setState(State::Manual);
             printf("[FSM] -> Manual (pedal released)\n");
             HAL_Delay(100); // Задержка для предотвращения дребезга

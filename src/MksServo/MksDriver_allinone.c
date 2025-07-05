@@ -3,6 +3,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include "fd_status.h"
+
 extern MksServo_t mksServo;
 // --- Основные функции из MksDriver.c ---
 void MksServo_Init(MksServo_t *servo, UART_HandleTypeDef *huart, GPIO_TypeDef *dere_port, uint16_t dere_pin, uint8_t address)
@@ -506,7 +508,7 @@ uint8_t MksServo_GetCarry(MksServo_t *servo, int32_t *carry, uint16_t *value, ui
                                 ((uint32_t)rx[3] << 24)
                             );
                             *value = (uint16_t)(rx[7] | (rx[8] << 8));
-                            printf("[MKS] Encoder carry: %ld, value: %u\r\n", *carry, *value);
+                            printf("[MKS] Encoder carry: %ld, value: %u\r\n", (long)*carry, *value);
                             return 1;
                         }
                     }
@@ -562,4 +564,21 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
     }
     printf("[MKS] Encoder addition value read timeout or CRC error\r\n");
     return 0;
+}
+
+// --- Отправка "сырых" пакетов по UART3 (RS485) ---
+// --- Сохраняет CRC последней отправленной команды для анализа статусов FD ---
+void MksServo_SendRaw(MksServo_t *servo, const uint8_t *data, uint16_t len) {
+    // Save CRC of the last sent command in the history buffer
+    if (len > 0) {
+        extern uint8_t last_cmd_crc_history[];
+        extern uint8_t last_cmd_crc_index;
+        last_cmd_crc_history[last_cmd_crc_index] = data[len-1];
+        last_cmd_crc_index = (last_cmd_crc_index + 1) % CMD_CRC_HISTORY;
+        last_fd_status.last_cmd_crc = data[len-1]; // для совместимости
+    }
+    // Enable RS485 transmit
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_UART_Transmit(servo->huart, (uint8_t*)data, len, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
 }
