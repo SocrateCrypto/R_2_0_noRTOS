@@ -119,7 +119,7 @@ void StateMachine_loop(void)
         {
             stateMachine.setState(State::Manual);
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
-
+                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo  
             printf("[FSM] -> Manual (from GiroScope)\n");
         }
         // 6. Если были в Calibrate/Bind/CalibrateAndBind и gyro нажата — возврат в GiroScope
@@ -141,6 +141,7 @@ void StateMachine_loop(void)
                  (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
         {
             stateMachine.setState(State::Manual);
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
             printf("[FSM] -> Manual (from Initial)\n");
         }
         // Только для BindMode, Calibrate, CalibrateAndBind (и GiroScope, если нужно)
@@ -203,6 +204,9 @@ void StateMachine_loop(void)
                 stateMachine.setState(State::Scan);
                 flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
                 debounce_timer = HAL_GetTick();
+
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+                HAL_Delay(10); // Короткая пауза для надійності
                 MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
@@ -213,6 +217,7 @@ void StateMachine_loop(void)
            // stateMachine.clearHomePosition();
             
             stateMachine.setState(State::Manual);
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
             printf("[FSM] -> Manual (pedal released)\n");
             HAL_Delay(100); // Задержка для предотвращения дребезга
         }

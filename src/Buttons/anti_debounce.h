@@ -6,13 +6,13 @@ typedef struct {
     GPIO_TypeDef* port;
     uint16_t pin;
     uint8_t stable_state;
-    uint8_t last_state;
-    uint8_t counter;
-    uint8_t threshold;
+    uint32_t last_change_time;
+    uint8_t debounce_time_ms;  // время игнорирования дребезга в мс
 } DebounceButton;
 
 // Инициализация структуры
-void debounce_init(DebounceButton* btn, GPIO_TypeDef* port, uint16_t pin, uint8_t threshold);
+void debounce_init(DebounceButton* btn, GPIO_TypeDef* port, uint16_t pin, uint8_t debounce_time_ms);
 
 // Проверка состояния с подавлением дребезга (вызывать в цикле)
+// Мгновенно реагирует на первое изменение, затем игнорирует дребезг debounce_time_ms миллисекунд
 uint8_t debounce_read(DebounceButton* btn);

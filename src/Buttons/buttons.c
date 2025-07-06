@@ -14,8 +14,8 @@ static DebounceButton rightDebounce;
 
 void buttonsDebounceInit(void)
 {
-    debounce_init(&leftDebounce, GPIOB, LEFT_Pin, 5);   // 5 — порог дребезга, подберите под себя
-    debounce_init(&rightDebounce, GPIOB, RIGHT_Pin, 5);
+    debounce_init(&leftDebounce, GPIOB, LEFT_Pin, 15);   // 15 мс — время игнорирования дребезга
+    debounce_init(&rightDebounce, GPIOB, RIGHT_Pin, 15); // можно подобрать оптимальное значение
 }
 
 bool updateGyroButtonState()

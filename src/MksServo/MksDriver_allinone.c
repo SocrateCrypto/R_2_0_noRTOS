@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "fd_status.h"
+#include <inttypes.h>
 
 extern MksServo_t mksServo;
 // --- Основные функции из MksDriver.c ---
@@ -593,10 +594,15 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
                 if (rx[9] == MksServo_GetCheckSum(rx, 9)) {
                     if (rx[2] == 0x31) {
                         *addition_value = 0;
+                        // Big-endian: rx[3] - старший, rx[8] - младший
                         for (int i = 0; i < 6; ++i) {
-                            *addition_value |= ((int64_t)rx[3 + i]) << (8 * i);
+                            *addition_value |= ((int64_t)rx[3 + i]) << (8 * (5 - i));
                         }
-                        printf("[MKS] Encoder addition value: %lld\r\n", *addition_value);
+                        // Sign extension для int48_t (big-endian)
+                        if (rx[3] & 0x80) {
+                            *addition_value |= (int64_t)0xFFFF000000000000;
+                        }
+                        printf("[MKS] Encoder addition value: %" PRId64 "\r\n", *addition_value);
                         return 1;
                     }
                 }

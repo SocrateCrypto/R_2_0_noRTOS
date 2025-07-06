@@ -32,17 +32,28 @@ typedef enum {
 
 extern ButtonsState buttonsState;
 
-// Функции для работы с кнопками
+// Функции обновления состояния кнопок
 void buttonsDebounceInit(void);
-bool updateButtonsState(void);
-bool updateGyroButtonState(void);
-bool updateTurnRightButtonState(void);
-bool updateTurnLeftButtonState(void);
-bool updateCalibrateButtonState(void);
-bool updateBindModeButtonState(void);
-
-// Добавьте прототип функции для двойного нажатия
+bool updateButtonsState();
+bool updateGyroButtonState();
+bool updateTurnRightButtonState();
+bool updateTurnLeftButtonState();
+bool updateCalibrateButtonState();
+bool updateBindModeButtonState();
 DoubleButtonEvent updateDoubleButtonsState(bool autoReset);
+
+// Функции для прямого чтения педалей без антидребезга (для быстрой остановки в Manual)
+inline bool isLeftPedalPressed_Raw() {
+    return (HAL_GPIO_ReadPin(GPIOB, LEFT_Pin) == GPIO_PIN_RESET);
+}
+
+inline bool isRightPedalPressed_Raw() {
+    return (HAL_GPIO_ReadPin(GPIOB, RIGHT_Pin) == GPIO_PIN_RESET);
+}
+
+inline bool areBothPedalsReleased_Raw() {
+    return (!isLeftPedalPressed_Raw() && !isRightPedalPressed_Raw());
+}
 
 #ifdef __cplusplus
 }

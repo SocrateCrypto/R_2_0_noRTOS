@@ -23,6 +23,7 @@
 #include "StateMachine/state_machine.h"
 #include <string.h>
 #include <math.h>
+#include <inttypes.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "MksServo/MksDriver_allinone.h"
@@ -41,6 +42,7 @@ extern "C"
 #include "NRF/NRF24_conf.h"
 #include "NRF/NRF24_reg_addresses.h"
 #include "NRF/nrf.h"
+#include "Potentiometr/Potentiometer.h"
 
   // Объявление внешней переменной irq
   extern volatile uint8_t irq;
@@ -160,6 +162,12 @@ uint8_t calc_crc(const uint8_t *data, size_t len)
   }
   return crc;
 }
+
+// --- Переводит угол в градусах в тики энкодера (0x4000 тиков = 360°) с учетом редуктора ---
+int32_t angle_deg_to_encoder_ticks(float angle_deg) {
+    return (int32_t)(angle_deg * ENCODER_PULSES_PER_360_DEGREE * MOTOR_GEAR_RATIO / 360.0f);
+}
+
 // --- ENUM-ы для статусов пакетов SERVO42D/57D ---
 typedef enum
 {
@@ -282,10 +290,10 @@ int main(void)
   printf("UART1 Printf Test: %d\r\n", 123);
   setvbuf(stdout, NULL, _IONBF, 0); // Отключить буферизацию
   /* USER CODE END 2 */
-  HAL_Delay(1000); // Пауза после инициализации
+  
   MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
   MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
-
+HAL_Delay(2000); // Пауза после инициализации
   // Устанавливаем режим работы сервопривода по умолчанию
   uint8_t servo_mode = 4; // Режим SR _CLOSE
   if (MksServo_SetWorkMode(&mksServo, servo_mode))
@@ -335,28 +343,41 @@ int main(void)
       // TODO: действия для Initial
       break;
     case State::Manual:
-      // TODO: действия для Manual
+      // Manual режим с улучшенным антидребезгом
       {
+        static uint32_t last_pot_tick = 0;
+        static uint8_t cached_pot_percent = 0;
         int32_t carry = 0;
         uint16_t value = 0;
-        if (buttonsState.turn_left == BUTTON_ON && !flag_first_run) // Если педаль нажата
+        uint32_t now = HAL_GetTick();
+        
+        // Обновляем кэшированное значение потенциометра каждые 100 мс
+        if (now - last_pot_tick >= 100) {
+          last_pot_tick = now;
+          cached_pot_percent = getPotentiometerValuePercentage();
+        }
+        
+        // Используем улучшенный антидребезг для всех событий (мгновенная реакция + защита от дребезга)
+        if (buttonsState.turn_left == BUTTON_ON) // Если левая педаль нажата
         {
           flag_first_run = true;
-          MksServo_GetCarry(&mksServo, &carry, &value, 100); // Флаг для первого запуска
-          MksServo_SpeedModeRun(&mksServo, 0x01, 500, 250);  //
+          MksServo_GetCarry(&mksServo, &carry, &value, 100);
+          MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent*5+50), 250);
           printf("[MKS] Servo running left\r\n");
         }
-        else if (buttonsState.turn_right == BUTTON_ON && !flag_first_run) // Если педаль нажата
+        else if (buttonsState.turn_right == BUTTON_ON) // Если правая педаль нажата
         {
-          flag_first_run = true;                            // Флаг для первого запуска
-          MksServo_SpeedModeRun(&mksServo, 0x00, 500, 250); //
+          flag_first_run = true;
+          MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent*5+50), 250);
           printf("[MKS] Servo running right\r\n");
         }
-        if (buttonsState.turn_right == BUTTON_OFF && buttonsState.turn_left == BUTTON_OFF && flag_first_run)
+        else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
         {
-          flag_first_run = false;                       // Сброс флага после отпускания педалей
+          // Обе педали отпущены - останавливаем двигатель
+          flag_first_run = false;  
           MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-          printf("[MKS] Servo stopped\r\n");
+          
+          printf("[MKS] Servo stopped (antibouce)\r\n");
         }
       }
       break;
@@ -364,33 +385,102 @@ int main(void)
 
       break;
     case State::Scan: {
-      // --- SCAN SWEEP LOGIC ---
-      static int scan_direction = 1; // 1 = right, -1 = left
-      static int scan_first_move = 1;
-      static int32_t scan_target_steps = 0;
-      static int scan_waiting_for_arrival = 0;
-      // Start move if not waiting for arrival
-      if (!scan_waiting_for_arrival) {
-        int32_t steps = angle_to_steps(motor.oscillation_angle);
-        if (scan_first_move) {
-          scan_first_move = 0;
-          scan_direction = 1;
+      // --- SCAN SWEEP LOGIC (возвращаем GetAdditionValue + анализируем проблему с остановкой) ---
+      static int scan_initialized = 0;
+      static int scan_direction = 1; // 1 = вправо, 0 = влево
+      static int scan_state = 0; // 0 - движение, 1 - стоп/пауза
+      static uint32_t stop_time = 0;
+      static int32_t scan_limit_ticks = 0; // граница сканирования
+      static uint32_t last_carry_poll = 0;
+      static uint32_t last_speed_update = 0; // для периодического обновления скорости
+      
+      if (!scan_initialized) {
+        scan_direction = 1;
+        scan_state = 0;
+        stop_time = 0;
+        
+        // Пересчитываем пределы сканирования из motor.oscillation_angle (в градусах) в тики энкодера
+        scan_limit_ticks = angle_deg_to_encoder_ticks((float)motor.oscillation_angle) / 2;
+        
+        int64_t addition_init = 0;
+        if (MksServo_GetAdditionValue(&mksServo, &addition_init, 100)) {
+            printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
         } else {
-          scan_direction = -scan_direction;
+            printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
         }
-        int32_t rel_steps = steps * scan_direction;
-        scan_target_steps += rel_steps;
-        uint16_t speed = 500; // Set your speed
-        uint8_t acc = 250;    // Set your acceleration
-        MksServo_AbsoluteMotionByPulse_FE(&mksServo, speed, acc, rel_steps);
-        printf("[SCAN] Move command sent: dir=%d, steps=%ld\n", scan_direction, (long)rel_steps);
-        scan_waiting_for_arrival = 1;
+        printf("[SCAN][DEBUG] motor.oscillation_angle = %d\n", motor.oscillation_angle);
+        printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)scan_limit_ticks);
+        
+        scan_initialized = 1;
+        
+        // Запускаем движение вправо
+        uint8_t scan_pot_percent = getPotentiometerValuePercentage();
+        int scan_speed = scan_pot_percent*5+50;
+        MksServo_SpeedModeRun(&mksServo, 1, scan_speed, 250);
+        printf("[SCAN] Start right, limit=%ld (encoder ticks), speed=%d\n", (long)scan_limit_ticks, scan_speed);
+        last_speed_update = HAL_GetTick(); // Инициализируем таймер
       }
-      // Wait for arrival enum
-      if (scan_waiting_for_arrival && last_fe_status_enum == FE_STATUS_RUN_COMPLETE) {
-        printf("[SCAN] Arrived at target (FE_STATUS_RUN_COMPLETE)\n");
-        last_fe_status_enum = FE_STATUS_UNKNOWN;
-        scan_waiting_for_arrival = 0;
+      
+      // Периодически опрашиваем координаты (раз в 20 мс)
+      uint32_t now = HAL_GetTick();
+      
+      if (now - last_carry_poll >= 20) {
+        last_carry_poll = now;
+        int64_t addition = 0;
+        if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
+          // Абсолютная позиция в тиках: addition value (int64_t)
+          if (scan_state == 0) { // Движение
+            printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)scan_limit_ticks, scan_direction);
+            
+            // Проверяем достижение границы
+            int boundary_reached = 0;
+            if (scan_direction == 1 && addition >= scan_limit_ticks) {
+              boundary_reached = 1;
+            } else if (scan_direction == 0 && addition <= -scan_limit_ticks) {
+              boundary_reached = 1;
+            }
+            
+            if (boundary_reached) {
+              // Достигли границы — стоп
+              MksServo_SpeedModeRun(&mksServo, scan_direction, 0, 250);
+              printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)scan_limit_ticks);
+              scan_state = 1;
+              stop_time = now;
+            } else {
+              // ПРОБЛЕМА БЫЛА ЗДЕСЬ: обновление скорости во время движения конфликтует с остановкой
+              // Добавим проверку что мы не слишком близко к границе перед обновлением скорости
+              int64_t distance_to_boundary;
+              if (scan_direction == 1) {
+                distance_to_boundary = scan_limit_ticks - addition;
+              } else {
+                distance_to_boundary = addition - (-scan_limit_ticks);
+              }
+              
+              // Обновляем скорость только если далеко от границы (больше 10% от лимита)
+              if (distance_to_boundary > (scan_limit_ticks / 10) && (now - last_speed_update >= 100)) {
+                last_speed_update = now;
+                uint8_t scan_pot_percent = getPotentiometerValuePercentage();
+                int scan_speed = scan_pot_percent*5+50;
+                MksServo_SpeedModeRun(&mksServo, scan_direction, scan_speed, 250);
+                printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", 
+                       scan_direction, scan_speed, distance_to_boundary);
+              }
+            }
+          } else if (scan_state == 1) { // Стоп/пауза
+            if (now - stop_time > 100) { // 100 мс пауза для надежности
+              // Меняем направление
+              scan_direction = !scan_direction;
+              uint8_t scan_pot_percent = getPotentiometerValuePercentage();
+              int scan_speed = scan_pot_percent*5+50;
+              MksServo_SpeedModeRun(&mksServo, scan_direction, scan_speed, 250);
+              printf("[SCAN] Reverse, dir=%d, addition=%" PRId64 ", speed=%d\n", scan_direction, addition, scan_speed);
+              scan_state = 0;
+              last_speed_update = now; // Сбрасываем таймер обновления скорости
+            }
+          }
+        } else {
+          printf("[SCAN][ERROR] GetAdditionValue failed\n");
+        }
       }
       break;
     }
@@ -1088,4 +1178,3 @@ int main(void)
   }
 #endif
 
-  // --- Глобальная переменная для отслеживания предыдущего состояния Scan ---
