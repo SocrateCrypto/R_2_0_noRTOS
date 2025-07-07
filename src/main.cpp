@@ -385,103 +385,88 @@ HAL_Delay(2000); // Пауза после инициализации
 
       break;
     case State::Scan: {
-      // --- SCAN SWEEP LOGIC (возвращаем GetAdditionValue + анализируем проблему с остановкой) ---
-      static int scan_initialized = 0;
-      static int scan_direction = 1; // 1 = вправо, 0 = влево
-      static int scan_state = 0; // 0 - движение, 1 - стоп/пауза
-      static uint32_t stop_time = 0;
-      static int32_t scan_limit_ticks = 0; // граница сканирования
-      static uint32_t last_carry_poll = 0;
-      static uint32_t last_speed_update = 0; // для периодического обновления скорости
-      
-      if (!scan_initialized) {
-        scan_direction = 1;
-        scan_state = 0;
-        stop_time = 0;
-        
-        // Пересчитываем пределы сканирования из motor.oscillation_angle (в градусах) в тики энкодера
-        scan_limit_ticks = angle_deg_to_encoder_ticks((float)motor.oscillation_angle) / 2;
-        
-        int64_t addition_init = 0;
-        if (MksServo_GetAdditionValue(&mksServo, &addition_init, 100)) {
-            printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
-        } else {
-            printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
-        }
-        printf("[SCAN][DEBUG] motor.oscillation_angle = %d\n", motor.oscillation_angle);
-        printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)scan_limit_ticks);
-        
-        scan_initialized = 1;
-        
-        // Запускаем движение вправо
-        uint8_t scan_pot_percent = getPotentiometerValuePercentage();
-        int scan_speed = scan_pot_percent*5+50;
-        MksServo_SpeedModeRun(&mksServo, 1, scan_speed, 250);
-        printf("[SCAN] Start right, limit=%ld (encoder ticks), speed=%d\n", (long)scan_limit_ticks, scan_speed);
-        last_speed_update = HAL_GetTick(); // Инициализируем таймер
-      }
-      
-      // Периодически опрашиваем координаты (раз в 20 мс)
-      uint32_t now = HAL_GetTick();
-      
-      if (now - last_carry_poll >= 20) {
-        last_carry_poll = now;
-        int64_t addition = 0;
-        if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
-          // Абсолютная позиция в тиках: addition value (int64_t)
-          if (scan_state == 0) { // Движение
-            printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)scan_limit_ticks, scan_direction);
-            
-            // Проверяем достижение границы
-            int boundary_reached = 0;
-            if (scan_direction == 1 && addition >= scan_limit_ticks) {
-              boundary_reached = 1;
-            } else if (scan_direction == 0 && addition <= -scan_limit_ticks) {
-              boundary_reached = 1;
-            }
-            
-            if (boundary_reached) {
-              // Достигли границы — стоп
-              MksServo_SpeedModeRun(&mksServo, scan_direction, 0, 250);
-              printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)scan_limit_ticks);
-              scan_state = 1;
-              stop_time = now;
-            } else {
-              // ПРОБЛЕМА БЫЛА ЗДЕСЬ: обновление скорости во время движения конфликтует с остановкой
-              // Добавим проверку что мы не слишком близко к границе перед обновлением скорости
-              int64_t distance_to_boundary;
-              if (scan_direction == 1) {
-                distance_to_boundary = scan_limit_ticks - addition;
+      // --- SCAN SWEEP LOGIC через структуру-функтор с enum FSM ---
+      struct ScanSweepFSM {
+        enum FSMState { FSM_INIT = 0, FSM_MOVING, FSM_PAUSE };
+        FSMState state = FSM_INIT;
+        int direction = 1; // 1 = вправо, 0 = влево
+        uint32_t stop_time = 0;
+        int32_t limit_ticks = 0;
+        uint32_t last_carry_poll = 0;
+        uint32_t last_speed_update = 0;
+        int initialized = 0;
+        void reset() { state = FSM_INIT; initialized = 0; }
+        void operator()(MksServo_t& mksServo, Motor& motor) {
+          uint32_t now = HAL_GetTick();
+          switch (state) {
+            case FSM_INIT: {
+              direction = 1;
+              stop_time = 0;
+              limit_ticks = angle_deg_to_encoder_ticks((float)motor.oscillation_angle) / 2;
+              int64_t addition_init = 0;
+              if (MksServo_GetAdditionValue(&mksServo, &addition_init, 100)) {
+                printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
               } else {
-                distance_to_boundary = addition - (-scan_limit_ticks);
+                printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
               }
-              
-              // Обновляем скорость только если далеко от границы (больше 10% от лимита)
-              if (distance_to_boundary > (scan_limit_ticks / 10) && (now - last_speed_update >= 100)) {
-                last_speed_update = now;
-                uint8_t scan_pot_percent = getPotentiometerValuePercentage();
-                int scan_speed = scan_pot_percent*5+50;
-                MksServo_SpeedModeRun(&mksServo, scan_direction, scan_speed, 250);
-                printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", 
-                       scan_direction, scan_speed, distance_to_boundary);
-              }
+              printf("[SCAN][DEBUG] motor.oscillation_angle = %d\n", motor.oscillation_angle);
+              printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
+              uint8_t pot = getPotentiometerValuePercentage();
+              int speed = pot*5+50;
+              MksServo_SpeedModeRun(&mksServo, 1, speed, 250);
+              printf("[SCAN] Start right, limit=%ld (encoder ticks), speed=%d\n", (long)limit_ticks, speed);
+              last_speed_update = now;
+              last_carry_poll = now;
+              state = FSM_MOVING;
+              break;
             }
-          } else if (scan_state == 1) { // Стоп/пауза
-            if (now - stop_time > 100) { // 100 мс пауза для надежности
-              // Меняем направление
-              scan_direction = !scan_direction;
-              uint8_t scan_pot_percent = getPotentiometerValuePercentage();
-              int scan_speed = scan_pot_percent*5+50;
-              MksServo_SpeedModeRun(&mksServo, scan_direction, scan_speed, 250);
-              printf("[SCAN] Reverse, dir=%d, addition=%" PRId64 ", speed=%d\n", scan_direction, addition, scan_speed);
-              scan_state = 0;
-              last_speed_update = now; // Сбрасываем таймер обновления скорости
+            case FSM_MOVING: {
+              if (now - last_carry_poll >= 20) {
+                last_carry_poll = now;
+                int64_t addition = 0;
+                if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
+                  printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
+                  int boundary_reached = 0;
+                  if (direction == 1 && addition >= limit_ticks) boundary_reached = 1;
+                  else if (direction == 0 && addition <= -limit_ticks) boundary_reached = 1;
+                  if (boundary_reached) {
+                    MksServo_SpeedModeRun(&mksServo, direction, 0, 250);
+                    printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
+                    stop_time = now;
+                    state = FSM_PAUSE;
+                  } else {
+                    int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
+                    if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100)) {
+                      last_speed_update = now;
+                      uint8_t pot = getPotentiometerValuePercentage();
+                      int speed = pot*5+50;
+                      MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+                      printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
+                    }
+                  }
+                } else {
+                  printf("[SCAN][ERROR] GetAdditionValue failed\n");
+                }
+              }
+              break;
+            }
+            case FSM_PAUSE: {
+              if (now - stop_time > 100) {
+                direction = !direction;
+                uint8_t pot = getPotentiometerValuePercentage();
+                int speed = pot*5+50;
+                MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+                printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
+                last_speed_update = now;
+                state = FSM_MOVING;
+              }
+              break;
             }
           }
-        } else {
-          printf("[SCAN][ERROR] GetAdditionValue failed\n");
         }
-      }
+      };
+      static ScanSweepFSM scanFSM;
+      scanFSM(mksServo, motor);
       break;
     }
     case State::BindMode:
