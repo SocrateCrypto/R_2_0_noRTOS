@@ -15,23 +15,29 @@ void StateMachine::setState(State newState) { currentState = newState; }
 bool StateMachine::is(State state) const { return currentState == state; }
 
 // Методы для работы с домашней позицией энкодера
-void StateMachine::setHomePosition(int32_t carry, uint16_t value) {
+void StateMachine::setHomePosition(int32_t carry, uint16_t value)
+{
     homeCarry = carry;
     homeValue = value;
     homePositionSet = true;
     printf("[StateMachine] Home position set: carry=%ld, value=%d\r\n", (long)carry, value);
 }
 
-void StateMachine::getHomePosition(int32_t* carry, uint16_t* value) const {
-    if (carry) *carry = homeCarry;
-    if (value) *value = homeValue;
+void StateMachine::getHomePosition(int32_t *carry, uint16_t *value) const
+{
+    if (carry)
+        *carry = homeCarry;
+    if (value)
+        *value = homeValue;
 }
 
-bool StateMachine::hasHomePosition() const {
+bool StateMachine::hasHomePosition() const
+{
     return homePositionSet;
 }
 
-void StateMachine::clearHomePosition() {
+void StateMachine::clearHomePosition()
+{
     homeCarry = 0;
     homeValue = 0;
     homePositionSet = false;
@@ -66,7 +72,7 @@ const char *stateToStr(State state)
 
 void StateMachine_loop(void)
 {
-    DoubleButtonEvent updateDoubleButtons= updateDoubleButtonsState(false);
+    DoubleButtonEvent updateDoubleButtons = updateDoubleButtonsState(false);
     if (updateDoubleButtons == DOUBLE_BTN_PRESS)
     {
         printf("[DBN] Double button pressed\n");
@@ -80,21 +86,21 @@ void StateMachine_loop(void)
         printf("[DBN] Double button short press\n");
     }
     else if (updateDoubleButtons == DOUBLE_BTN_LONG)
-    { 
-        if(stateMachine.is(State::Scan))
+    {
+        if (stateMachine.is(State::Scan))
         {
             // Если в Scan, то выходим из него
-           
+
             HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET); // Выключить лампочку
-          mode_scan = ANGLE_ADJUST;
+            mode_scan = ANGLE_ADJUST;
+            nrf_send_angle_agiust_mode(); // Отправляем режим ANGLE_ADJUST
         }
-       
-        
+
         printf("[DBN] Double button long press\n");
     }
     static bool flag_blocked_for_debounce = 0; // Флаг блокировки Scan
     static uint32_t debounce_timer = 0;
-    static int last_speed = 0; // Последняя скорость для ANGLE_ADJUST
+    static int last_speed = 0;     // Последняя скорость для ANGLE_ADJUST
     extern AngleSetting mode_scan; // Используем глобальную переменную
 
     if (updateButtonsState())
@@ -108,7 +114,7 @@ void StateMachine_loop(void)
             {
                 stateMachine.setState(State::CalibrateAndBind);
                 printf("[FSM] -> CalibrateAndBind\n");
-                nrf_enter_binding_mode(); // Входим в режим привязки NRF
+                nrf_enter_binding_mode();                                    // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
         }
@@ -119,7 +125,7 @@ void StateMachine_loop(void)
             {
                 stateMachine.setState(State::BindMode);
                 printf("[FSM] -> BindMode\n");
-                nrf_enter_binding_mode(); // Входим в режим привязки NRF
+                nrf_enter_binding_mode();                                    // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
         }
@@ -147,7 +153,7 @@ void StateMachine_loop(void)
         {
             stateMachine.setState(State::Manual);
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
-                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo  
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250);              // stop servo
             printf("[FSM] -> Manual (from GiroScope)\n");
         }
         // 6. Если были в Calibrate/Bind/CalibrateAndBind и gyro нажата — возврат в GiroScope
@@ -156,10 +162,11 @@ void StateMachine_loop(void)
             (stateMachine.is(State::Calibrate) || stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)))
         {
             // Если выходим из режимов с привязкой - отключаем режим привязки
-            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)) {
+            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind))
+            {
                 nrf_exit_binding_mode(); // Выходим из режима привязки NRF
             }
-            
+
             stateMachine.setState(State::GiroScope);
             printf("[FSM] -> GiroScope (after Calibrate/Bind)\n");
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET); // Выключить лампочку
@@ -184,10 +191,11 @@ void StateMachine_loop(void)
             buttonsState.turn_right == BUTTON_OFF)
         {
             // Если выходим из режимов с привязкой - отключаем режим привязки
-            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind)) {
+            if (stateMachine.is(State::BindMode) || stateMachine.is(State::CalibrateAndBind))
+            {
                 nrf_exit_binding_mode(); // Выходим из режима привязки NRF
             }
-            
+
             stateMachine.setState(State::Initial);
             printf("[FSM] -> Initial (from Bind/Calibrate)\n");
         }
@@ -204,36 +212,41 @@ void StateMachine_loop(void)
                 // Сохраняем текущую позицию как домашнюю перед входом в Scan
                 int32_t carry = 0;
                 uint16_t value = 0;
-                
+
                 // Делаем несколько попыток чтения позиции
                 bool position_read = false;
-                for (int i = 0; i < 5; i++) {
+                for (int i = 0; i < 5; i++)
+                {
                     HAL_Delay(10); // Небольшая задержка между попытками
-                    if (MksServo_GetCarry(&mksServo, &carry, &value, 100)) {
+                    if (MksServo_GetCarry(&mksServo, &carry, &value, 100))
+                    {
                         position_read = true;
                         break;
                     }
                 }
-                
-                if (position_read) {
+
+                if (position_read)
+                {
                     stateMachine.setHomePosition(carry, value);
                     printf("[FSM] Home position saved: carry=%ld, value=%d\r\n", (long)carry, value);
-                } else {
+                }
+                else
+                {
                     printf("[FSM] Failed to read position, using fallback!\r\n");
                     // Используем последние известные значения (если есть)
                     carry = 0;
                     value = 0;
                     stateMachine.setHomePosition(carry, value);
                 }
-                
+
                 stateMachine.setState(State::Scan);
                 flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
-                HAL_GPIO_WritePin(LED2_GPIO_Port,LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
-
+                HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
+                nrf_send_long_beep();
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                HAL_Delay(10); // Короткая пауза для надійності
-                MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
+                HAL_Delay(10);                                // Короткая пауза для надійності
+                MksServo_CurrentAxisToZero_92(&mksServo);     // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
@@ -251,6 +264,7 @@ void StateMachine_loop(void)
                 // Угол осцилляции вычисляется по потенциометру
                 int pot_percent = getPotentiometerValuePercentage();
                 int angle = (pot_percent * 360) / 100;
+
                 // Здесь используйте angle для вашей логики осцилляции
                 // Например:
                 printf("[FSM] ANGLE_ADJUST: angle=%d deg, speed=%d\n", angle, last_speed);
@@ -259,10 +273,11 @@ void StateMachine_loop(void)
             if (!flag_blocked_for_debounce && (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
             {
                 // Очищаем домашнюю позицию при выходе из Scan
-               // stateMachine.clearHomePosition();
-                 HAL_GPIO_WritePin(LED2_GPIO_Port,LED2_Pin, GPIO_PIN_RESET); 
-                 mode_scan = ANGLE_SCAN;
+                // stateMachine.clearHomePosition();
+                HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+                mode_scan = ANGLE_SCAN;
                 stateMachine.setState(State::Manual);
+                nrgf_send_angle_agiust_exit();                  // Выходим из режима ANGLE_ADJUST
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
                 printf("[FSM] -> Manual (pedal released)\n");
                 HAL_Delay(100); // Задержка для предотвращения дребезга
@@ -270,9 +285,8 @@ void StateMachine_loop(void)
         }
     }
 
-    
-// Сброс блокировки для антидребезга во время 
-//отпускания  педалей при заходе в Scan через 0.8 сек
+    // Сброс блокировки для антидребезга во время
+    // отпускания  педалей при заходе в Scan через 0.8 сек
     if (flag_blocked_for_debounce)
     {
         if (HAL_GetTick() - debounce_timer > 800)

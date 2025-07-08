@@ -124,6 +124,44 @@ void nrf_send_bind_response(void) {
     printf("BIND_OK response sent and back to RX mode!\r\n");
 }
 
+void nrf_send_angle_agiust_mode(void)
+{
+    const char msg[] = "angle_agiust_mode";
+    uint8_t buf[PLD_S] = {0};
+    strncpy((char*)buf, msg, sizeof(buf)-1);
+    for (int i = 0; i < 3; ++i) {
+        nrf24_stop_listen();
+        ce_low();
+        nrf24_flush_tx(); // Очищаем буфер передачи перед отправкой
+        nrf24_open_tx_pipe(tx_addr);
+        HAL_Delay(4);
+        nrf24_transmit(buf, PLD_S);
+        HAL_Delay(4);
+        nrf24_listen();
+        ce_high();
+        HAL_Delay(20); // Пауза между попытками
+    }
+}
+
+void nrgf_send_angle_agiust_exit(void)
+{
+    const char msg[] = "angle_agiust_exit";
+    uint8_t buf[PLD_S] = {0};
+    strncpy((char*)buf, msg, sizeof(buf)-1);
+    for (int i = 0; i < 3; ++i) {
+        nrf24_stop_listen();
+        ce_low();
+        nrf24_flush_tx(); // Очищаем буфер передачи перед отправкой
+        nrf24_open_tx_pipe(tx_addr);
+        HAL_Delay(4);
+        nrf24_transmit(buf, PLD_S);
+        HAL_Delay(4);
+        nrf24_listen();
+        ce_high();
+        HAL_Delay(20); // Пауза между попытками
+    }
+}
+
 // Функция обработки пакета привязки
 static void process_bind_packet(const uint8_t* data) {
     bind_packet_t* bind_packet = (bind_packet_t*)data;
@@ -510,4 +548,40 @@ void nrf_set_working_address(const uint8_t address[5]) {
     
     printf("[NRF] Working address set to: 0x%02X%02X%02X%02X%02X\r\n",
            tx_addr[0], tx_addr[1], tx_addr[2], tx_addr[3], tx_addr[4]);
+}
+
+void nrf_send_short_beep(void)
+{
+    const char msg[] = "short_beep";
+    uint8_t buf[PLD_S] = {0};
+    strncpy((char*)buf, msg, sizeof(buf)-1);
+    for (int i = 0; i < 3; ++i) {
+        nrf24_stop_listen();
+        ce_low();
+        nrf24_open_tx_pipe(tx_addr);
+        HAL_Delay(10);
+        nrf24_transmit(buf, PLD_S);
+        HAL_Delay(10);
+        nrf24_listen();
+        ce_high();
+        HAL_Delay(20);
+    }
+}
+
+void nrf_send_long_beep(void)
+{
+    const char msg[] = "long_beep";
+    uint8_t buf[PLD_S] = {0};
+    strncpy((char*)buf, msg, sizeof(buf)-1);
+    for (int i = 0; i < 3; ++i) {
+        nrf24_stop_listen();
+        ce_low();
+        nrf24_open_tx_pipe(tx_addr);
+        HAL_Delay(10);
+        nrf24_transmit(buf, PLD_S);
+        HAL_Delay(10);
+        nrf24_listen();
+        ce_high();
+        HAL_Delay(20);
+    }
 }

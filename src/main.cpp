@@ -2,16 +2,15 @@
 /**
  ******************************************************************************
  * @file           : main.c
- * @brief          : Main program body
+ * @brief          : Головний файл програми
  ******************************************************************************
  * @attention
  *
  * Copyright (c) 2025 STMicroelectronics.
  * All rights reserved.
  *
- * This software is licensed under terms that can be found in the LICENSE file
- * in the root directory of this software component.
- * If no LICENSE file comes with this software, it is provided AS-IS.
+ * Це програмне забезпечення ліцензовано згідно з умовами, які можна знайти у файлі LICENSE у кореневому каталозі цього програмного компонента.
+ * Якщо файл LICENSE відсутній, програмне забезпечення надається "ЯК Є".
  *
  ******************************************************************************
  */
@@ -44,11 +43,11 @@ extern "C"
 #include "NRF/nrf.h"
 #include "Potentiometr/Potentiometer.h"
 
-  // Объявление внешней переменной irq
+  // Оголошення зовнішньої змінної irq
   extern volatile uint8_t irq;
 
-  // Прототип фонового парсера UART3 для вывода только 5-байтовых пакетов статуса
-  // ВАЖНО: Не включайте этот прототип в main.h, чтобы избежать ошибок компиляции в других C-файлах!
+  // Прототип фоновго парсера UART3 для виводу лише 5-байтових пакетів статусу
+  // ВАЖЛИВО: Не включайте цей прототип у main.h, щоб уникнути помилок компіляції в інших C-файлах!
   void MksServo_BackgroundPacketDebug(MksServo_t *servo);
 
 #ifdef __cplusplus
@@ -88,23 +87,23 @@ UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-// Глобальная переменная для MKS Servo
-// Глобальный буфер для приема
+// Глобальна змінна для MKS Servo
+// Глобальний буфер для прийому
 uint8_t uart3_rx_byte;
 MksServo_t mksServo;
 
-// Определяем переменные для NRF24
-#define PLD_S 32 // payload size should be equal to transmitter
+// Оголошення змінних для NRF24
+#define PLD_S 32 // розмір корисного навантаження має відповідати передавачу
 
-// Флаг для включения подробного режима отладки (закомментировать для отключения)
+// Прапорець для увімкнення детального режиму відладки (закоментуйте для вимкнення)
 // #define VERBOSE_DEBUG
 
-// Определение типа состояния сканирования для режима Scan
+// Оголошення типу стану сканування для режиму Scan
 typedef enum
 {
-  SCAN_INIT,        // Инициализация
-  SCAN_MOVING_LEFT, // Движение влево (-angle/2)
-  SCAN_MOVING_RIGHT // Движение вправо (+angle/2)
+  SCAN_INIT,        // Ініціалізація
+  SCAN_MOVING_LEFT, // Рух вліво (-angle/2)
+  SCAN_MOVING_RIGHT // Рух вправо (+angle/2)
 } ScanState;
 
 /* Private function prototypes -----------------------------------------------*/
@@ -123,24 +122,24 @@ static void MX_SPI2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 FD_status_t last_fd_status = {0};
-int last_fd_status_printed = -1; // Для контроля вывода смены статуса
+int last_fd_status_printed = -1; // Для контролю виводу зміни статусу
 #define CMD_CRC_HISTORY 3
 uint8_t last_cmd_crc_history[CMD_CRC_HISTORY] = {0};
 uint8_t last_cmd_crc_index = 0;
-// Глобальная переменная для CRC последней отправленной команды (движение/стоп)
+// Глобальна змінна для CRC останньої відправленої команди (рух/стоп)
 uint8_t last_cmd_crc = 0;
-// Флаг для Scan-режима: разрешено ли отправлять команду движения
+// Прапорець для Scan-режиму: чи дозволено відправляти команду руху
 int scan_ready_to_move = 1;
-// Глобальная переменная для угла сканирования
+// Глобальна змінна для кута сканування
 int angle_of_scan = 180;
-// Глобальный флаг успешного обнуления координат
+// Глобальний прапорець успішного обнулення координат
 int scan_zeroing_done = 0;
-// Глобальная переменная для передаточного числа редуктора (можно менять)
+// Глобальна змінна для передавального числа редуктора (можна змінювати)
 float gear_ratio = 19.2f;
 
-// --- Новая функция пересчёта угла в шаги с учётом редуктора и микрошагов ---
-// steps_per_rev = 200 (шагов на оборот двигателя)
-// microsteps = 32 (микрошагов)
+// --- Нова функція перерахунку кута в кроки з урахуванням редуктора та мікрокроків ---
+// steps_per_rev = 200 (кроків на оберт двигуна)
+// microsteps = 32 (мікрокроків)
 // gear_ratio = 19.2 (редуктор)
 // steps_for_360 = 200 * 32 * 19.2 = 122880
 int32_t angle_to_steps(float angle_deg)
@@ -152,7 +151,7 @@ int32_t angle_to_steps(float angle_deg)
   return (int32_t)(steps_for_360 * angle_deg / 360.0f);
 }
 
-// --- Функция вычисления CRC для команд SERVO42D/57D (сумма всех байт кроме CRC) ---
+// --- Функція обчислення CRC для команд SERVO42D/57D (сума всіх байт окрім CRC) ---
 uint8_t calc_crc(const uint8_t *data, size_t len)
 {
   uint8_t crc = 0;
@@ -163,12 +162,12 @@ uint8_t calc_crc(const uint8_t *data, size_t len)
   return crc;
 }
 
-// --- Переводит угол в градусах в тики энкодера (0x4000 тиков = 360°) с учетом редуктора ---
+// --- Перетворює кут у градусах у тики енкодера (0x4000 тиків = 360°) з урахуванням редуктора ---
 int32_t angle_deg_to_encoder_ticks(float angle_deg) {
     return (int32_t)(angle_deg * ENCODER_PULSES_PER_360_DEGREE * MOTOR_GEAR_RATIO / 360.0f);
 }
 
-// --- ENUM-ы для статусов пакетов SERVO42D/57D ---
+// --- ENUM-и для статусів пакетів SERVO42D/57D ---
 typedef enum
 {
   FD_STATUS_STOP_FAIL = 0,
@@ -193,14 +192,14 @@ typedef enum
   ZERO_STATUS_UNKNOWN = 255
 } Zero_StatusEnum;
 
-// --- Глобальные переменные для хранения последних статусов ---
+// --- Глобальні змінні для зберігання останніх статусів ---
 FD_StatusEnum last_fd_status_enum = FD_STATUS_UNKNOWN;
 FE_StatusEnum last_fe_status_enum = FE_STATUS_UNKNOWN;
 Zero_StatusEnum last_zero_status_enum = ZERO_STATUS_UNKNOWN;
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
+ * @brief  Точка входу в додаток.
  * @retval int
  */
 int main(void)
@@ -212,21 +211,21 @@ int main(void)
 
   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  /* Скидання всіх периферійних пристроїв, ініціалізація Flash та Systick. */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
 
-  /* Configure the system clock */
+  /* Налаштування системного тактового генератора */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
+  /* Ініціалізація всіх налаштованих периферійних пристроїв */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
@@ -235,21 +234,21 @@ int main(void)
   MX_I2C1_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
-  StateMachine_setup(); // Инициализация машины состояний
+  StateMachine_setup(); // Ініціалізація машини станів
 
   printf("NRF24 RX Test Started\r\n");
   printf("UART1 printf redirection working!\r\n");
 
-  // Инициализация Flash памяти
+  // Ініціалізація Flash пам'яті
   printf("Initializing Flash storage...\r\n");
   if (FlashStorage_Init() == HAL_OK)
   {
     printf("Flash storage initialized successfully\r\n");
 
-    // Выводим информацию о сохраненном адресе пульта
+    // Виводимо інформацію про збережену адресу пульта
     FlashStorage_PrintStoredAddress();
 
-    // Если есть сохраненный адрес пульта, загружаем его в NRF24
+    // Якщо є збережена адреса пульта, завантажуємо її в NRF24
     if (FlashStorage_HasValidRemoteAddress())
     {
       uint8_t stored_address[5];
@@ -257,7 +256,7 @@ int main(void)
       {
         printf("[NRF] Loading stored remote address for NRF24: 0x%02X%02X%02X%02X%02X\r\n",
                stored_address[0], stored_address[1], stored_address[2], stored_address[3], stored_address[4]);
-        // Устанавливаем загруженный адрес как рабочий для NRF24
+        // Встановлюємо завантажену адресу як робочу для NRF24
         nrf_set_working_address(stored_address);
       }
     }
@@ -265,8 +264,8 @@ int main(void)
     {
       printf("[NRF] No remote address stored, device needs pairing\r\n");
 
-      // ВРЕМЕННО: очищаем Flash при обнаружении некорректных данных
-      // Это нужно для перехода на новый алгоритм контрольной суммы
+      // ТИМЧАСОВО: очищаємо Flash при виявленні некоректних даних
+      // Це потрібно для переходу на новий алгоритм контрольної суми
       printf("[NRF] Clearing Flash due to checksum algorithm update...\r\n");
       FlashStorage_ForceErase();
     }
@@ -276,25 +275,25 @@ int main(void)
     printf("Flash storage initialization failed\r\n");
   }
 
-  // Инициализация NRF24
-  ce_low();       // Сначала CE в LOW
-  HAL_Delay(100); // Увеличиваем задержку для стабилизации
-  csn_high();     // Затем CSN в HIGH
-  HAL_Delay(100); // Еще подождем
+  // Ініціалізація NRF24
+  ce_low();       // Спочатку CE в LOW
+  HAL_Delay(100); // Збільшуємо затримку для стабілізації
+  csn_high();     // Потім CSN в HIGH
+  HAL_Delay(100); // Ще трохи чекаємо
 
   nrf24_init();
-  nrf_init_next(); // Инициализация NRF24 с передачей irq
+  nrf_init_next(); // Ініціалізація NRF24 з передачею irq
 
   // Тест UART
 
   printf("UART1 Printf Test: %d\r\n", 123);
-  setvbuf(stdout, NULL, _IONBF, 0); // Отключить буферизацию
+  setvbuf(stdout, NULL, _IONBF, 0); // Вимкнути буферизацію
   /* USER CODE END 2 */
   
   MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
-  MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
-HAL_Delay(2000); // Пауза после инициализации
-  // Устанавливаем режим работы сервопривода по умолчанию
+  MksServo_SetMicrostep(&mksServo, 0x05); // Встановлення мікрокроків у 16
+HAL_Delay(2000); // Пауза після ініціалізації
+  // Встановлюємо режим роботи сервоприводу за замовчуванням
   uint8_t servo_mode = 5; // Режим SR _CLOSE
   if (MksServo_SetWorkMode(&mksServo, servo_mode))
   {
@@ -304,12 +303,12 @@ HAL_Delay(2000); // Пауза после инициализации
   {
     printf("[MKS] Failed to set work mode\r\n");
   }
-  Motor motor; // Инициализация глобальной переменной motor
+  Motor motor; // Ініціалізація глобальної змінної motor
 
-  // Инициализируем значения по умолчанию
-  motor.oscillation_angle = 180; // Значение по умолчанию на случай ошибки загрузки
+  // Ініціалізуємо значення за замовчуванням
+  motor.oscillation_angle = 180; // Значення за замовчуванням на випадок помилки завантаження
 
-  // Загружаем угол размаха из Flash памяти
+  // Завантажуємо кут розмаху з Flash пам'яті
   int16_t motor_angle;
   if (FlashStorage_LoadOscillationAngle(&motor_angle) == HAL_OK)
   {
@@ -326,24 +325,24 @@ HAL_Delay(2000); // Пауза после инициализации
   {
 
     nrf_loop(irq);
-    MksServo_BackgroundPacketDebug(&mksServo); // Фоновый парсер UART3
+    MksServo_BackgroundPacketDebug(&mksServo); // Фоновий парсер UART3
 
     /* USER CODE END WHILE */
     /* USER CODE BEGIN 3 */
-    static bool flag_first_run = false; // Флаг для первого запуска педали
+    static bool flag_first_run = false; // Прапорець для першого запуску педалі
 
     State current_state = stateMachine.getState();
 
     StateMachine_loop();
 
-    // Условный выбор действий по текущему состоянию
+    // Умовний вибір дій за поточним станом
     switch (current_state)
     {
     case State::Initial:
-      // TODO: действия для Initial
+      // TODO: дії для Initial
       break;
     case State::Manual:
-      // Manual режим с улучшенным антидребезгом
+      // Manual режим з покращеним антидребезгом
       {
         static uint32_t last_pot_tick = 0;
         static uint8_t cached_pot_percent = 0;
@@ -351,21 +350,21 @@ HAL_Delay(2000); // Пауза после инициализации
         uint16_t value = 0;
         uint32_t now = HAL_GetTick();
         
-        // Обновляем кэшированное значение потенциометра каждые 100 мс
+        // Оновлюємо кешоване значення потенціометра кожні 100 мс
         if (now - last_pot_tick >= 100) {
           last_pot_tick = now;
           cached_pot_percent = getPotentiometerValuePercentage();
         }
         
-        // Используем улучшенный антидребезг для всех событий (мгновенная реакция + защита от дребезга)
-        if (buttonsState.turn_left == BUTTON_ON) // Если левая педаль нажата
+        // Використовуємо покращений антидребезг для всіх подій (миттєва реакція + захист від дребезгу)
+        if (buttonsState.turn_left == BUTTON_ON) // Якщо ліва педаль натиснута
         {
           flag_first_run = true;
           MksServo_GetCarry(&mksServo, &carry, &value, 100);
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent*6+50), 250);
           printf("[MKS] Servo running left\r\n");
         }
-        else if (buttonsState.turn_right == BUTTON_ON) // Если правая педаль нажата
+        else if (buttonsState.turn_right == BUTTON_ON) // Якщо права педаль натиснута
         {
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent*6+50), 250);
@@ -373,9 +372,9 @@ HAL_Delay(2000); // Пауза после инициализации
         }
         else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
         {
-          // Обе педали отпущены - останавливаем двигатель
+          // Обидві педалі відпущені - зупиняємо двигун
           flag_first_run = false;  
-          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
           
           printf("[MKS] Servo stopped (antibouce)\r\n");
         }
@@ -385,12 +384,12 @@ HAL_Delay(2000); // Пауза после инициализации
 
       break;
     case State::Scan: {
-      // --- SCAN SWEEP LOGIC через структуру-функтор с enum FSM ---
-      extern AngleSetting mode_scan; // Глобальная переменная режима
+      // --- ЛОГІКА СКАНУВАННЯ через структуру-функтор з enum FSM ---
+      extern AngleSetting mode_scan; // Глобальна змінна режиму
       struct ScanSweepFSM {
         enum FSMState { FSM_INIT = 0, FSM_MOVING, FSM_PAUSE };
         FSMState state = FSM_INIT;
-        int direction = 1; // 1 = вправо, 0 = влево
+        int direction = 1; // 1 = вправо, 0 = вліво
         uint32_t stop_time = 0;
         int32_t limit_ticks = 0;
         uint32_t last_carry_poll = 0;
@@ -404,14 +403,14 @@ HAL_Delay(2000); // Пауза после инициализации
             case FSM_INIT: {
               direction = 1;
               stop_time = 0;
-              // --- Выбор угла осцилляции ---
+              // --- Вибір кута осциляції ---
               int angle = 0;
               if (mode_scan == ANGLE_SCAN) {
                 angle = motor.oscillation_angle;
               } else {
                 int pot = getPotentiometerValuePercentage();
                 angle = (pot * 360) / 100;
-                if (angle < 1) angle = 1; // Минимальный угол
+                if (angle < 1) angle = 1; // Мінімальний кут
               }
               limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
               int64_t addition_init = 0;
@@ -436,14 +435,22 @@ HAL_Delay(2000); // Пауза после инициализации
               if (now - last_carry_poll >= 20) {
                 last_carry_poll = now;
                 int64_t addition = 0;
+                int angle = 0;
+                if (mode_scan == ANGLE_ADJUST) {
+                  int pot = getPotentiometerValuePercentage();
+                  angle = (pot * 360) / 100;
+                  if (angle < 1) angle = 1;
+                  limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+                }
                 if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
                   printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
                   int boundary_reached = 0;
                   if (direction == 1 && addition >= limit_ticks) boundary_reached = 1;
                   else if (direction == 0 && addition <= -limit_ticks) boundary_reached = 1;
+                  // В режимі ANGLE_ADJUST: якщо мотор вийшов за нову межу — одразу розворот
                   if (boundary_reached) {
-                    MksServo_SpeedModeRun(&mksServo, direction, 0, 250);
-                    HAL_Delay(160); // Пауза для остановки
+                    MksServo_SpeedModeRun(&mksServo, direction, 0, 252);
+                    HAL_Delay(150); // експериментальна пауза для зупинки(замінити на неблок.)
                     printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
                     stop_time = now;
                     state = FSM_PAUSE;
@@ -457,7 +464,7 @@ HAL_Delay(2000); // Пауза после инициализации
                         speed = pot*6+50;
                         last_speed = speed;
                       } else {
-                        speed = last_speed; // Не обновляем скорость
+                        speed = last_speed; // Не оновлюємо швидкість
                       }
                       MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
                       printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
@@ -472,7 +479,7 @@ HAL_Delay(2000); // Пауза после инициализации
             case FSM_PAUSE: {
               if (now - stop_time > 100) {
                 direction = !direction;
-                // --- Пересчитываем угол для ANGLE_ADJUST ---
+                // --- Перераховуємо кут для ANGLE_ADJUST ---
                 int angle = 0;
                 if (mode_scan == ANGLE_SCAN) {
                   angle = motor.oscillation_angle;
@@ -499,27 +506,27 @@ HAL_Delay(2000); // Пауза после инициализации
       break;
     }
     case State::BindMode:
-      // TODO: действия для BindMode
+      // TODO: дії для BindMode
       break;
     case State::Calibrate:
-      // TODO: действия для Calibrate
+      // TODO: дії для Calibrate
       break;
     case State::CalibrateAndBind:
-      // TODO: действия для CalibrateAndBind
+      // TODO: дії для CalibrateAndBind
       break;
     case State::AngleAdjust: 
       break;
     
     default:
-      // TODO: обработка неизвестного состояния
+      // TODO: обробка невідомого стану
       break;
     }
-    HAL_Delay(1); // Задержка перед выходом из цикла
-  } // <-- Закрываем while(1)
-} // <-- Закрываем main
+    HAL_Delay(1); // Затримка перед виходом з циклу
+  } // <-- Закриваємо while(1)
+} // <-- Закриваємо main
 
 /**
-   * @brief System Clock Configuration
+   * @brief Налаштування системного тактового генератора
    * @retval None
    */
   void SystemClock_Config(void)
@@ -528,8 +535,8 @@ HAL_Delay(2000); // Пауза после инициализации
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
     RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-    /** Initializes the RCC Oscillators according to the specified parameters
-     * in the RCC_OscInitTypeDef structure.
+    /** Ініціалізація генераторів RCC згідно з параметрами
+     * у структурі RCC_OscInitTypeDef.
      */
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
     RCC_OscInitStruct.HSEState = RCC_HSE_ON;
@@ -543,7 +550,7 @@ HAL_Delay(2000); // Пауза после инициализации
       Error_Handler();
     }
 
-    /** Initializes the CPU, AHB and APB buses clocks
+    /** Ініціалізація тактових сигналів CPU, AHB та APB
      */
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
     RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -564,7 +571,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief ADC1 Initialization Function
+   * @brief Ініціалізація ADC1
    * @param None
    * @retval None
    */
@@ -581,7 +588,7 @@ HAL_Delay(2000); // Пауза после инициализации
 
     /* USER CODE END ADC1_Init 1 */
 
-    /** Common config
+    /** Загальна конфігурація
      */
     hadc1.Instance = ADC1;
     hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
@@ -595,7 +602,7 @@ HAL_Delay(2000); // Пауза после инициализации
       Error_Handler();
     }
 
-    /** Configure Regular Channel
+    /** Налаштування регулярного каналу
      */
     sConfig.Channel = ADC_CHANNEL_7;
     sConfig.Rank = ADC_REGULAR_RANK_1;
@@ -610,7 +617,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief I2C1 Initialization Function
+   * @brief Ініціалізація I2C1
    * @param None
    * @retval None
    */
@@ -643,7 +650,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief SPI2 Initialization Function
+   * @brief Ініціалізація SPI2
    * @param None
    * @retval None
    */
@@ -657,7 +664,7 @@ HAL_Delay(2000); // Пауза после инициализации
     /* USER CODE BEGIN SPI2_Init 1 */
 
     /* USER CODE END SPI2_Init 1 */
-    /* SPI2 parameter configuration*/
+    /* Налаштування SPI2 */
     hspi2.Instance = SPI2;
     hspi2.Init.Mode = SPI_MODE_MASTER;
     hspi2.Init.Direction = SPI_DIRECTION_2LINES;
@@ -680,7 +687,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief USART1 Initialization Function
+   * @brief Ініціалізація USART1
    * @param None
    * @retval None
    */
@@ -712,7 +719,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief USART2 Initialization Function
+   * @brief Ініціалізація USART2
    * @param None
    * @retval None
    */
@@ -744,7 +751,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief USART3 Initialization Function
+   * @brief Ініціалізація USART3
    * @param None
    * @retval None
    */
@@ -776,7 +783,7 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief GPIO Initialization Function
+   * @brief Ініціалізація GPIO
    * @param None
    * @retval None
    */
@@ -787,61 +794,61 @@ HAL_Delay(2000); // Пауза после инициализации
 
     /* USER CODE END MX_GPIO_Init_1 */
 
-    /* GPIO Ports Clock Enable */
+    /* Увімкнення тактування портів GPIO */
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_GPIOD_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /*Configure GPIO pin Output Level */
+    /* Встановити рівень виходу для пінів */
     HAL_GPIO_WritePin(GPIOC, LED_Pin | LED2_Pin, GPIO_PIN_RESET);
 
-    /*Configure GPIO pin Output Level */
+    /* Встановити рівень виходу для пінів */
     HAL_GPIO_WritePin(GPIOA, LAMP_Pin | IMU_EN_Pin, GPIO_PIN_RESET);
 
-    /*Configure GPIO pin Output Level */
+    /* Встановити рівень виходу для пінів */
     HAL_GPIO_WritePin(GPIOB, RS485_DERE_Pin | CSN_Pin | CE_Pin, GPIO_PIN_RESET);
 
-    /*Configure GPIO pins : LED_Pin LED2_Pin */
+    /* Налаштування пінів : LED_Pin LED2_Pin */
     GPIO_InitStruct.Pin = LED_Pin | LED2_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-    /*Configure GPIO pins : LAMP_Pin IMU_EN_Pin */
+    /* Налаштування пінів : LAMP_Pin IMU_EN_Pin */
     GPIO_InitStruct.Pin = LAMP_Pin | IMU_EN_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /*Configure GPIO pins : CALL_Pin COMP_Pin BIND_Pin */
+    /* Налаштування пінів : CALL_Pin COMP_Pin BIND_Pin */
     GPIO_InitStruct.Pin = CALL_Pin | COMP_Pin | BIND_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    /*Configure GPIO pins : LEFT_Pin RIGHT_Pin */
+    /* Налаштування пінів : LEFT_Pin RIGHT_Pin */
     GPIO_InitStruct.Pin = LEFT_Pin | RIGHT_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
     GPIO_InitStruct.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /*Configure GPIO pin : IRQ_Pin */
+    /* Налаштування піну : IRQ_Pin */
     GPIO_InitStruct.Pin = IRQ_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-    GPIO_InitStruct.Pull = GPIO_NOPULL; // ИСПРАВЛЕНИЕ: убираем pull-up, т.к. IRQ уже подтянут на плате
+    GPIO_InitStruct.Pull = GPIO_NOPULL; // ВИПРАВЛЕННЯ: прибираємо pull-up, оскільки IRQ вже підтягнутий на платі
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /* Enable and set EXTI Line interrupt */
+    /* Увімкнення та налаштування переривання EXTI Line */
     HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
-    /*Configure GPIO pins : RS485_DERE_Pin CSN_Pin CE_Pin */
+    /* Налаштування пінів : RS485_DERE_Pin CSN_Pin CE_Pin */
     GPIO_InitStruct.Pin = RS485_DERE_Pin | CSN_Pin | CE_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN; // ИСПРАВЛЕНИЕ: добавляем pull-down для DERE
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN; // ВИПРАВЛЕННЯ: додаємо pull-down для DERE
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -856,24 +863,24 @@ HAL_Delay(2000); // Пауза после инициализации
   {
 #endif
 
-    // Глобальная переменная для сигнализации о завершении приема UART3
-    // Callback функции для работы с UART прерываниями
+    // Глобальна змінна для сигналізації про завершення прийому UART3
+    // Callback-функції для роботи з UART перериваннями
 
     void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
-      // Callback при ошибке UART
-      // Ничего дополнительного делать не нужно, HAL сам управляет состоянием
+      // Callback при помилці UART
+      // Додаткових дій не потрібно, HAL сам керує станом
     }
 
     void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     {
       if (huart == &huart3)
       {
-        // Здесь обработайте принятый байт: uart3_rx_byte
-        // Например, положите в свой буфер или обработайте сразу
+        // Тут обробіть прийнятий байт: uart3_rx_byte
+        // Наприклад, покладіть у свій буфер або обробіть одразу
         MksServo_UART_IRQHandler(&mksServo, huart);
 
-        // Перезапустить прием следующего байта
+        // Перезапустити прийом наступного байта
         HAL_UART_Receive_IT(&huart3, &uart3_rx_byte, 1);
       }
     }
@@ -896,11 +903,11 @@ HAL_Delay(2000); // Пауза после инициализации
   /* USER CODE END 4 */
 
   /**
-   * @brief  Period elapsed callback in non blocking mode
-   * @note   This function is called  when TIM3 interrupt took place, inside
-   * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
-   * a global variable "uwTick" used as application time base.
-   * @param  htim : TIM handle
+   * @brief  Callback, що викликається при переповненні таймера у неблокуючому режимі
+   * @note   Ця функція викликається, коли відбувається переривання TIM3, всередині
+   * HAL_TIM_IRQHandler(). Вона напряму викликає HAL_IncTick() для інкременту
+   * глобальної змінної "uwTick", яка використовується як таймер додатку.
+   * @param  htim : дескриптор таймера
    * @retval None
    */
   void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef * htim)
@@ -918,13 +925,13 @@ HAL_Delay(2000); // Пауза после инициализации
   }
 
   /**
-   * @brief  This function is executed in case of error occurrence.
+   * @brief  Ця функція виконується у разі виникнення помилки.
    * @retval None
    */
   void Error_Handler(void)
   {
     /* USER CODE BEGIN Error_Handler_Debug */
-    /* User can add his own implementation to report the HAL error return state */
+    /* Користувач може додати власну реалізацію для повідомлення про помилку HAL */
     __disable_irq();
     while (1)
     {
@@ -934,24 +941,24 @@ HAL_Delay(2000); // Пауза после инициализации
 
 #ifdef USE_FULL_ASSERT
   /**
-   * @brief  Reports the name of the source file and the source line number
-   *         where the assert_param error has occurred.
-   * @param  file: pointer to the source file name
-   * @param  line: assert_param error line source number
+   * @brief  Виводить ім'я вихідного файлу та номер рядка,
+   *         де виникла помилка assert_param.
+   * @param  file: вказівник на ім'я вихідного файлу
+   * @param  line: номер рядка, де виникла помилка
    * @retval None
    */
   void assert_failed(uint8_t *file, uint32_t line)
   {
     /* USER CODE BEGIN 6 */
-    /* User can add his own implementation to report the file name and line number,
-       ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+    /* Користувач може додати власну реалізацію для виводу імені файлу та рядка,
+       наприклад: printf("Wrong parameters value: file %s on line %d\r\n", file, line); */
     printf("Wrong parameters value: file %s on line %lu\r\n", file, line);
     /* USER CODE END 6 */
   }
 #endif /* USE_FULL_ASSERT */
 
-// --- Фоновый парсер UART3 для вывода только 5-байтовых пакетов статуса и обработки 0x92 ---
-// Теперь парсер не использует CRC из ответа, а только last_cmd_crc, который обновляется при отправке команды
+// --- Фоновий парсер UART3 для виводу лише 5-байтових пакетів статусу та обробки 0x92 ---
+// Тепер парсер не використовує CRC з відповіді, а лише last_cmd_crc, який оновлюється при відправці команди
 #ifdef __cplusplus
   extern "C"
   {
@@ -963,12 +970,12 @@ HAL_Delay(2000); // Пауза после инициализации
 
   void MksServo_BackgroundPacketDebug(MksServo_t * servo)
   {
-    static uint8_t packet[16]; // запас по длине
+    static uint8_t packet[16]; // запас по довжині
     static uint8_t idx = 0;
     static uint8_t collecting = 0;
     uint8_t byte;
-    extern int scan_ready_to_move;  // флаг для Scan-режима
-    static int zeroing_success = 0; // 1 - успешно обнулили
+    extern int scan_ready_to_move;  // прапорець для Scan-режиму
+    static int zeroing_success = 0; // 1 - успішно обнулили
     while (MksServo_RxGetByte(servo, &byte))
     {
       printf("[UART3][RAW] RX byte: %02X\n", byte);
@@ -986,20 +993,20 @@ HAL_Delay(2000); // Пауза после инициализации
         packet[idx++] = byte;
         if (idx == 3)
         {
-          // На третьем байте (packet[2]) определяем тип пакета
+          // На третьому байті (packet[2]) визначаємо тип пакета
           switch (packet[2])
           {
-          case 0xFD: // Статусный пакет
-            // Ждем 5 байт
+          case 0xFD: // Статусний пакет
+            // Чекаємо 5 байт
             break;
-          case 0x92: // Ответ на Set Current Axis to Zero
-            // Ждем 5 байт
+          case 0x92: // Відповідь на Set Current Axis to Zero
+            // Чекаємо 5 байт
             break;
-          case 0xFE: // Ответ на AbsoluteMotionByPulse_FE
-            // Ждем 5 байт
+          case 0xFE: // Відповідь на AbsoluteMotionByPulse_FE
+            // Чекаємо 5 байт
             break;
           default:
-            // Пока не поддерживаем другие типы
+            // Поки не підтримуємо інші типи
             collecting = 0;
             idx = 0;
             continue;
@@ -1015,7 +1022,7 @@ HAL_Delay(2000); // Пауза после инициализации
           fd.status = packet[3];
           fd.crc = packet[4];
           extern uint8_t last_cmd_crc;
-          // --- Обновляем глобальный enum статуса ---
+          // --- Оновлюємо глобальний enum статусу ---
           switch (fd.status)
           {
           case 0:
@@ -1091,7 +1098,7 @@ HAL_Delay(2000); // Пауза после инициализации
         if (packet[2] == 0x92 && idx == 5)
         {
           uint8_t status = packet[3];
-          // --- Обновляем глобальный enum статуса ---
+          // --- Оновлюємо глобальний enum статусу ---
           switch (status)
           {
           case 0:
@@ -1125,7 +1132,7 @@ HAL_Delay(2000); // Пауза после инициализации
         if (packet[2] == 0xFE && idx == 5)
         {
           uint8_t status = packet[3];
-          // --- Обновляем глобальный enum статуса ---
+          // --- Оновлюємо глобальний enum статусу ---
           switch (status)
           {
           case 0:
@@ -1172,7 +1179,7 @@ HAL_Delay(2000); // Пауза после инициализации
         }
       }
     }
-    // Обновляем глобальный флаг успешного обнуления
+    // Оновлюємо глобальний прапорець успішного обнулення
     if (zeroing_success)
     {
       scan_zeroing_done = 1;

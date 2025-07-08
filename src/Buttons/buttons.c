@@ -82,7 +82,7 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
         else
         {
             uint32_t held = HAL_GetTick() - press_start;
-            if (held >= 5000 && event_sent < 3)
+            if (held >= 3000 && event_sent < 3)
             {
                 result = DOUBLE_BTN_LONG;
                 event_sent = 3;
