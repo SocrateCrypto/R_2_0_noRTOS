@@ -295,7 +295,7 @@ int main(void)
   MksServo_SetMicrostep(&mksServo, 0x05); // Установка микрошагов в 16
 HAL_Delay(2000); // Пауза после инициализации
   // Устанавливаем режим работы сервопривода по умолчанию
-  uint8_t servo_mode = 4; // Режим SR _CLOSE
+  uint8_t servo_mode = 5; // Режим SR _CLOSE
   if (MksServo_SetWorkMode(&mksServo, servo_mode))
   {
     printf("[MKS] Work mode set to default: %d\r\n", servo_mode);
@@ -362,13 +362,13 @@ HAL_Delay(2000); // Пауза после инициализации
         {
           flag_first_run = true;
           MksServo_GetCarry(&mksServo, &carry, &value, 100);
-          MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent*5+50), 250);
+          MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent*6+50), 250);
           printf("[MKS] Servo running left\r\n");
         }
         else if (buttonsState.turn_right == BUTTON_ON) // Если правая педаль нажата
         {
           flag_first_run = true;
-          MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent*5+50), 250);
+          MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent*6+50), 250);
           printf("[MKS] Servo running right\r\n");
         }
         else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
@@ -386,6 +386,7 @@ HAL_Delay(2000); // Пауза после инициализации
       break;
     case State::Scan: {
       // --- SCAN SWEEP LOGIC через структуру-функтор с enum FSM ---
+      extern AngleSetting mode_scan; // Глобальная переменная режима
       struct ScanSweepFSM {
         enum FSMState { FSM_INIT = 0, FSM_MOVING, FSM_PAUSE };
         FSMState state = FSM_INIT;
@@ -395,6 +396,7 @@ HAL_Delay(2000); // Пауза после инициализации
         uint32_t last_carry_poll = 0;
         uint32_t last_speed_update = 0;
         int initialized = 0;
+        int last_speed = 0; // Для ANGLE_ADJUST
         void reset() { state = FSM_INIT; initialized = 0; }
         void operator()(MksServo_t& mksServo, Motor& motor) {
           uint32_t now = HAL_GetTick();
@@ -402,17 +404,27 @@ HAL_Delay(2000); // Пауза после инициализации
             case FSM_INIT: {
               direction = 1;
               stop_time = 0;
-              limit_ticks = angle_deg_to_encoder_ticks((float)motor.oscillation_angle) / 2;
+              // --- Выбор угла осцилляции ---
+              int angle = 0;
+              if (mode_scan == ANGLE_SCAN) {
+                angle = motor.oscillation_angle;
+              } else {
+                int pot = getPotentiometerValuePercentage();
+                angle = (pot * 360) / 100;
+                if (angle < 1) angle = 1; // Минимальный угол
+              }
+              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
               int64_t addition_init = 0;
               if (MksServo_GetAdditionValue(&mksServo, &addition_init, 100)) {
                 printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
               } else {
                 printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
               }
-              printf("[SCAN][DEBUG] motor.oscillation_angle = %d\n", motor.oscillation_angle);
+              printf("[SCAN][DEBUG] angle = %d\n", angle);
               printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
               uint8_t pot = getPotentiometerValuePercentage();
               int speed = pot*5+50;
+              last_speed = speed;
               MksServo_SpeedModeRun(&mksServo, 1, speed, 250);
               printf("[SCAN] Start right, limit=%ld (encoder ticks), speed=%d\n", (long)limit_ticks, speed);
               last_speed_update = now;
@@ -431,6 +443,7 @@ HAL_Delay(2000); // Пауза после инициализации
                   else if (direction == 0 && addition <= -limit_ticks) boundary_reached = 1;
                   if (boundary_reached) {
                     MksServo_SpeedModeRun(&mksServo, direction, 0, 250);
+                    HAL_Delay(160); // Пауза для остановки
                     printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
                     stop_time = now;
                     state = FSM_PAUSE;
@@ -438,8 +451,14 @@ HAL_Delay(2000); // Пауза после инициализации
                     int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
                     if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100)) {
                       last_speed_update = now;
-                      uint8_t pot = getPotentiometerValuePercentage();
-                      int speed = pot*5+50;
+                      int speed = 0;
+                      if (mode_scan == ANGLE_SCAN) {
+                        uint8_t pot = getPotentiometerValuePercentage();
+                        speed = pot*6+50;
+                        last_speed = speed;
+                      } else {
+                        speed = last_speed; // Не обновляем скорость
+                      }
                       MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
                       printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
                     }
@@ -453,8 +472,18 @@ HAL_Delay(2000); // Пауза после инициализации
             case FSM_PAUSE: {
               if (now - stop_time > 100) {
                 direction = !direction;
-                uint8_t pot = getPotentiometerValuePercentage();
-                int speed = pot*5+50;
+                // --- Пересчитываем угол для ANGLE_ADJUST ---
+                int angle = 0;
+                if (mode_scan == ANGLE_SCAN) {
+                  angle = motor.oscillation_angle;
+                } else {
+                  int pot = getPotentiometerValuePercentage();
+                  angle = (pot * 360) / 100;
+                  if (angle < 1) angle = 1;
+                  limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+                  printf("[SCAN][ADJUST] angle=%d, limit_ticks=%ld\n", angle, (long)limit_ticks);
+                }
+                int speed = (mode_scan == ANGLE_SCAN) ? (getPotentiometerValuePercentage()*6+50) : last_speed;
                 MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
                 printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
                 last_speed_update = now;
@@ -478,76 +507,9 @@ HAL_Delay(2000); // Пауза после инициализации
     case State::CalibrateAndBind:
       // TODO: действия для CalibrateAndBind
       break;
-    case State::AngleAdjust: {
-      // --- ANGLE ADJUST LOGIC через структуру-функтор с enum FSM ---
-      struct AngleAdjustFSM {
-        enum FSMState { FSM_INIT = 0, FSM_MOVING, FSM_DONE };
-        FSMState state = FSM_INIT;
-        int direction = 1; // 1 = вправо, 0 = влево
-        int32_t target_ticks = 0;
-        uint32_t last_carry_poll = 0;
-        uint32_t last_speed_update = 0;
-        int initialized = 0;
-        void reset() { state = FSM_INIT; initialized = 0; }
-        void operator()(MksServo_t& mksServo, Motor& motor) {
-          uint32_t now = HAL_GetTick();
-          switch (state) {
-            case FSM_INIT: {
-              // Получить текущее положение (addition)
-              int64_t addition = 0;
-              if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
-                // Здесь задайте нужный угол (например, motor.oscillation_angle или angle_of_scan, либо отдельная переменная)
-                float target_angle = (float)angle_of_scan; // или motor.oscillation_angle, или пользовательский ввод
-                target_ticks = angle_deg_to_encoder_ticks(target_angle);
-                direction = (target_ticks > addition) ? 1 : 0;
-                uint8_t pot = getPotentiometerValuePercentage();
-                int speed = pot*5+50;
-                MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-                printf("[ANGLE] Start move to %ld (ticks), dir=%d, speed=%d, current=%" PRId64 "\n", (long)target_ticks, direction, speed, addition);
-                last_speed_update = now;
-                last_carry_poll = now;
-                state = FSM_MOVING;
-              } else {
-                printf("[ANGLE][ERROR] GetAdditionValue failed\n");
-              }
-              break;
-            }
-            case FSM_MOVING: {
-              if (now - last_carry_poll >= 20) {
-                last_carry_poll = now;
-                int64_t addition = 0;
-                if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
-                  int32_t delta = target_ticks - addition;
-                  if (abs(delta) < 10) { // Порог точности 10 тиков
-                    MksServo_SpeedModeRun(&mksServo, direction, 0, 250);
-                    printf("[ANGLE] Arrived at %ld (target=%ld), delta=%ld\n", (long)addition, (long)target_ticks, (long)delta);
-                    state = FSM_DONE;
-                  } else {
-                    if (now - last_speed_update >= 100) {
-                      last_speed_update = now;
-                      uint8_t pot = getPotentiometerValuePercentage();
-                      int speed = pot*5+50;
-                      MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-                      printf("[ANGLE] Moving, dir=%d, speed=%d, delta=%ld\n", direction, speed, (long)delta);
-                    }
-                  }
-                } else {
-                  printf("[ANGLE][ERROR] GetAdditionValue failed\n");
-                }
-              }
-              break;
-            }
-            case FSM_DONE: {
-              // Можно добавить обработку завершения, сброс флагов, ожидание выхода из режима
-              break;
-            }
-          }
-        }
-      };
-      static AngleAdjustFSM angleFSM;
-      angleFSM(mksServo, motor);
+    case State::AngleAdjust: 
       break;
-    }
+    
     default:
       // TODO: обработка неизвестного состояния
       break;

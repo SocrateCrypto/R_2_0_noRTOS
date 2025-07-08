@@ -1,6 +1,12 @@
 #pragma once
 #include <stdint.h>
 
+// Enum для установки угла
+enum AngleSetting {
+    ANGLE_SCAN,
+    ANGLE_ADJUST
+};
+
 enum class State
 {
     Initial,//початковий стан, електричне утримання ротора двигуна вимнено
@@ -37,7 +43,7 @@ private:
     bool homePositionSet;
 };
 extern StateMachine stateMachine; // Экземпляр stateMachine
-
+extern AngleSetting mode_scan; // Глобальная переменная для установки угла
 void StateMachine_loop(void);
 void StateMachine_setup(void);
 

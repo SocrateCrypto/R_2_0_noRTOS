@@ -7,7 +7,7 @@
 #include "MksServo/MksDriver_allinone.h"
 #include "NRF/nrf.h" // Добавляем для функций привязки
 #include <stdio.h>
-
+AngleSetting mode_scan = ANGLE_SCAN;
 StateMachine::StateMachine() : currentState(State::Initial), homeCarry(0), homeValue(0), homePositionSet(false) {}
 
 State StateMachine::getState() const { return currentState; }
@@ -66,9 +66,37 @@ const char *stateToStr(State state)
 
 void StateMachine_loop(void)
 {
-
+    DoubleButtonEvent updateDoubleButtons= updateDoubleButtonsState(false);
+    if (updateDoubleButtons == DOUBLE_BTN_PRESS)
+    {
+        printf("[DBN] Double button pressed\n");
+    }
+    else if (updateDoubleButtons == DOUBLE_BTN_RELEASE)
+    {
+        printf("[DBN] Double button released\n");
+    }
+    else if (updateDoubleButtons == DOUBLE_BTN_SHORT)
+    {
+        printf("[DBN] Double button short press\n");
+    }
+    else if (updateDoubleButtons == DOUBLE_BTN_LONG)
+    { 
+        if(stateMachine.is(State::Scan))
+        {
+            // Если в Scan, то выходим из него
+           
+            HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET); // Выключить лампочку
+          mode_scan = ANGLE_ADJUST;
+        }
+       
+        
+        printf("[DBN] Double button long press\n");
+    }
     static bool flag_blocked_for_debounce = 0; // Флаг блокировки Scan
     static uint32_t debounce_timer = 0;
+    static int last_speed = 0; // Последняя скорость для ANGLE_ADJUST
+    extern AngleSetting mode_scan; // Используем глобальную переменную
+
     if (updateButtonsState())
     {
         // 1. Приоритет: CalibrateAndBind
@@ -170,12 +198,9 @@ void StateMachine_loop(void)
             stateMachine.is(State::Manual) ||
             stateMachine.is(State::GiroScope))
         {
-            // Проверка нажатия педалей
             if ((buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON) &&
-                !flag_blocked_for_debounce) // Проверяем флаг блокировки
+                !flag_blocked_for_debounce)
             {
-                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                
                 // Сохраняем текущую позицию как домашнюю перед входом в Scan
                 int32_t carry = 0;
                 uint16_t value = 0;
@@ -202,8 +227,9 @@ void StateMachine_loop(void)
                 }
                 
                 stateMachine.setState(State::Scan);
-                flag_blocked_for_debounce = 1; // Блокируем Scan на время дебаунса
+                flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
+                HAL_GPIO_WritePin(LED2_GPIO_Port,LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
 
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
                 HAL_Delay(10); // Короткая пауза для надійності
@@ -211,15 +237,36 @@ void StateMachine_loop(void)
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
-        if (stateMachine.is(State::Scan) && !flag_blocked_for_debounce && (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
+        if (stateMachine.is(State::Scan))
         {
-            // Очищаем домашнюю позицию при выходе из Scan
-           // stateMachine.clearHomePosition();
-            
-            stateMachine.setState(State::Manual);
-            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
-            printf("[FSM] -> Manual (pedal released)\n");
-            HAL_Delay(100); // Задержка для предотвращения дребезга
+            if (mode_scan == ANGLE_SCAN)
+            {
+                // Обычная логика Scan (ничего не меняем)
+                // Пример: обновление скорости от потенциометра
+                last_speed = getPotentiometerValuePercentage();
+            }
+            else if (mode_scan == ANGLE_ADJUST)
+            {
+                // Скорость не обновляется, используем last_speed
+                // Угол осцилляции вычисляется по потенциометру
+                int pot_percent = getPotentiometerValuePercentage();
+                int angle = (pot_percent * 360) / 100;
+                // Здесь используйте angle для вашей логики осцилляции
+                // Например:
+                printf("[FSM] ANGLE_ADJUST: angle=%d deg, speed=%d\n", angle, last_speed);
+                // Управление сервоприводом или другой логикой — по вашему проекту
+            }
+            if (!flag_blocked_for_debounce && (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
+            {
+                // Очищаем домашнюю позицию при выходе из Scan
+               // stateMachine.clearHomePosition();
+                 HAL_GPIO_WritePin(LED2_GPIO_Port,LED2_Pin, GPIO_PIN_RESET); 
+                 mode_scan = ANGLE_SCAN;
+                stateMachine.setState(State::Manual);
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
+                printf("[FSM] -> Manual (pedal released)\n");
+                HAL_Delay(100); // Задержка для предотвращения дребезга
+            }
         }
     }
 

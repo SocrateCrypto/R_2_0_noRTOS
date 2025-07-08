@@ -59,12 +59,18 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
     static uint32_t press_start = 0;
     static uint8_t event_sent = 0; // 0: ничего, 1: PRESS, 2: SHORT, 3: LONG
     static uint8_t released_sent = 0;
-
-    uint8_t now = (buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON);
+    // Используем антидребезговое чтение!
+    uint8_t left = (debounce_read(&leftDebounce) == GPIO_PIN_RESET);
+    uint8_t right = (debounce_read(&rightDebounce) == GPIO_PIN_RESET);
+    uint8_t now = left && right;
+    
+   
     DoubleButtonEvent result = DOUBLE_BTN_NONE;
 
-    if (now) {
-        if (!prev) {
+    if (now)
+    {
+        if (!prev)
+        {
             // Первое одновременное нажатие
             press_start = HAL_GetTick();
             event_sent = 0;
@@ -72,20 +78,28 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
             result = DOUBLE_BTN_PRESS;
             event_sent = 1;
             printf("[DBTN] PRESS: both pedals pressed, t=%lu\n", HAL_GetTick());
-        } else {
+        }
+        else
+        {
             uint32_t held = HAL_GetTick() - press_start;
-            if (held >= 5000 && event_sent < 3) {
+            if (held >= 5000 && event_sent < 3)
+            {
                 result = DOUBLE_BTN_LONG;
                 event_sent = 3;
                 printf("[DBTN] LONG: held %lu ms\n", held);
-            } else if (held >= 500 && event_sent < 2) {
+            }
+            else if (held >= 500 && event_sent < 2)
+            {
                 result = DOUBLE_BTN_SHORT;
                 event_sent = 2;
                 printf("[DBTN] SHORT: held %lu ms\n", held);
             }
         }
-    } else {
-        if (prev && !released_sent) {
+    }
+    else
+    {
+        if (prev && !released_sent)
+        {
             result = DOUBLE_BTN_RELEASE;
             released_sent = 1;
             printf("[DBTN] RELEASE: both pedals released, t=%lu\n", HAL_GetTick());
@@ -114,18 +128,17 @@ bool updateButtonsState()
         prevState.calibrate != buttonsState.calibrate ||
         prevState.gyro != buttonsState.gyro ||
         prevState.turn_left != buttonsState.turn_left ||
-        prevState.turn_right != buttonsState.turn_right
-    ) {
-        #define BTN_STR(x) ((x) == BUTTON_ON ? "ON" : "OFF")
+        prevState.turn_right != buttonsState.turn_right)
+    {
+#define BTN_STR(x) ((x) == BUTTON_ON ? "ON" : "OFF")
         printf("[Buttons] State changed: bind=%s, cal=%s, gyro=%s, left=%s, right=%s\n",
-            BTN_STR(buttonsState.bind_mode),
-            BTN_STR(buttonsState.calibrate),
-            BTN_STR(buttonsState.gyro),
-            BTN_STR(buttonsState.turn_left),
-            BTN_STR(buttonsState.turn_right)
-        );
+               BTN_STR(buttonsState.bind_mode),
+               BTN_STR(buttonsState.calibrate),
+               BTN_STR(buttonsState.gyro),
+               BTN_STR(buttonsState.turn_left),
+               BTN_STR(buttonsState.turn_right));
         prevState = buttonsState;
-        #undef BTN_STR
+#undef BTN_STR
     }
 
     return changed;
