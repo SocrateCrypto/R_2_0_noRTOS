@@ -82,6 +82,11 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
 uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms);
 uint8_t MksServo_AbsoluteMotionByPulse_FE(MksServo_t *servo, uint16_t speed, uint8_t acc, int32_t rel_steps );
 uint8_t MksServo_CurrentAxisToZero_92(MksServo_t *servo);
+extern uint8_t last_f6_status;
+void reset_last_f6_status(void);
+extern uint8_t last_f5_status;
+void reset_last_f5_status(void);
+uint8_t MksServo_QueryStatus_F1(MksServo_t *servo, uint32_t timeout_ms);
 #ifdef __cplusplus
 }
 #endif

@@ -5,8 +5,14 @@
 #include <math.h>
 #include "fd_status.h"
 #include <inttypes.h>
+#include <stdint.h>
 
 extern MksServo_t mksServo;
+extern uint8_t last_f5_status;
+extern void reset_last_f5_status(void);
+extern uint8_t last_f6_status;
+extern void reset_last_f6_status(void);
+
 // --- Основные функции из MksDriver.c ---
 void MksServo_Init(MksServo_t *servo, UART_HandleTypeDef *huart, GPIO_TypeDef *dere_port, uint16_t dere_pin, uint8_t address)
 {
@@ -616,6 +622,121 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
 
 uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms)
 {
+    uint8_t tx[11];
+    uint16_t speed = 100;
+    uint8_t acc = 200;
+    int32_t absAxis = (int32_t)(*addition_value);
+    tx[0] = 0xFA;
+    tx[1] = servo->device_address;
+    tx[2] = 0xF5;
+    tx[3] = (speed >> 8) & 0xFF;
+    tx[4] = speed & 0xFF;
+    tx[5] = acc;
+    tx[6] = (absAxis >> 24) & 0xFF;
+    tx[7] = (absAxis >> 16) & 0xFF;
+    tx[8] = (absAxis >> 8) & 0xFF;
+    tx[9] = absAxis & 0xFF;
+    tx[10] = MksServo_GetCheckSum(tx, 10);
+    uint32_t start = HAL_GetTick();
+    uint8_t rx[5];
+    uint8_t rx_cnt = 0;
+    uint8_t last_nonf5_code = 0;
+    uint8_t last_nonf5_rx[5] = {0};
+    while ((HAL_GetTick() - start) < timeout_ms) {
+        HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+        HAL_Delay(1);
+        HAL_UART_Transmit(servo->huart, tx, 11, 100);
+        HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+        printf("[MKS][F5] Sent: ");
+        for (int i = 0; i < 11; i++) printf("%02X ", tx[i]);
+        printf("\r\n");
+        uint32_t wait_start = HAL_GetTick();
+        rx_cnt = 0;
+        while ((HAL_GetTick() - wait_start) < 200) {
+            uint8_t b;
+            if (MksServo_RxGetByte(servo, &b)) {
+                if (rx_cnt != 0) {
+                    rx[rx_cnt++] = b;
+                } else if (b == 0xFB) {
+                    rx[rx_cnt++] = b;
+                }
+                if (rx_cnt == 5) {
+                    printf("[MKS][F5] RX: ");
+                    for (int i = 0; i < 5; i++) printf("%02X ", rx[i]);
+                    printf("\r\n");
+                    if (rx[4] == MksServo_GetCheckSum(rx, 4)) {
+                        if (rx[2] == 0xF5) {
+                            uint8_t status = rx[3];
+                            last_f5_status = status;
+                            printf("[MKS][F5] Status: %d\r\n", status);
+                            if (status == 1) {
+                                // Движение начато, теперь ждать завершения как обычно
+                                uint32_t run_start = HAL_GetTick();
+                                uint8_t confirmed = 0;
+                                while ((HAL_GetTick() - run_start) < 3000) { // run_timeout 3 сек
+                                    uint8_t b2;
+                                    uint8_t rx2[5];
+                                    uint8_t rx2_cnt = 0;
+                                    while (MksServo_RxGetByte(servo, &b2)) {
+                                        if (rx2_cnt != 0) {
+                                            rx2[rx2_cnt++] = b2;
+                                        } else if (b2 == 0xFB) {
+                                            rx2[rx2_cnt++] = b2;
+                                        }
+                                        if (rx2_cnt == 5) {
+                                            if (rx2[4] == MksServo_GetCheckSum(rx2, 4) && rx2[2] == 0xF5) {
+                                                uint8_t st2 = rx2[3];
+                                                last_f5_status = st2;
+                                                printf("[MKS][F5] Status: %d\r\n", st2);
+                                                if (st2 == 2 || st2 == 3) {
+                                                    printf("[MKS][F5] Motion complete (status %d)\r\n", st2);
+                                                    return 1;
+                                                }
+                                            }
+                                            rx2_cnt = 0;
+                                        }
+                                    }
+                                }
+                                printf("[MKS][F5] Timeout waiting for F5 run complete, but motion started.\r\n");
+                                return 1; // <--- теперь возвращаем успех, если движение началось
+                            }
+                            if (status == 2 || status == 3) {
+                                printf("[MKS][F5] Motion complete (status %d)\r\n", status);
+                                return 1;
+                            }
+                            if (status == 0) {
+                                printf("[MKS][F5] Unexpected status: 0, retrying after 40ms\r\n");
+                                HAL_Delay(40);
+                                break;
+                            }
+                            printf("[MKS][F5] Unexpected status: %d\r\n", status);
+                            return 0;
+                        } else if (rx[2] == 0xF6) {
+                            last_f6_status = rx[3];
+                            printf("[MKS][F5] F6 status seen in F5 wait: %d\r\n", rx[3]);
+                            rx_cnt = 0;
+                            continue;
+                        } else {
+                            last_nonf5_code = rx[2];
+                            memcpy(last_nonf5_rx, rx, 5);
+                            printf("[MKS][F5] Unexpected packet code: %02X (expected F5), ignoring\r\n", rx[2]);
+                            rx_cnt = 0;
+                            continue;
+                        }
+                    } else {
+                        printf("[MKS][F5] CRC error, ignoring packet\r\n");
+                        rx_cnt = 0;
+                    }
+                }
+            }
+        }
+    }
+    printf("[MKS][F5] Timeout waiting for F5 response\r\n");
+    if (last_nonf5_code) {
+        printf("[MKS][F5] Last non-F5 packet: ");
+        for (int i = 0; i < 5; i++) printf("%02X ", last_nonf5_rx[i]);
+        printf("\r\n");
+    }
     return 0;
 }
 
@@ -634,4 +755,48 @@ void MksServo_SendRaw(MksServo_t *servo, const uint8_t *data, uint16_t len) {
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
     HAL_UART_Transmit(servo->huart, (uint8_t*)data, len, 100);
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+}
+
+uint8_t MksServo_QueryStatus_F1(MksServo_t *servo, uint32_t timeout_ms)
+{
+    uint8_t tx[4];
+    tx[0] = 0xFA;
+    tx[1] = servo->device_address;
+    tx[2] = 0xF1;
+    tx[3] = MksServo_GetCheckSum(tx, 3);
+    printf("[MKS][F1] Sent: ");
+    for (int i = 0; i < 4; i++) printf("%02X ", tx[i]);
+    printf("\r\n");
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 4, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+    uint32_t start = HAL_GetTick();
+    uint8_t rx[5];
+    uint8_t rx_cnt = 0;
+    while ((HAL_GetTick() - start) < timeout_ms) {
+        uint8_t b;
+        if (MksServo_RxGetByte(servo, &b)) {
+            if (rx_cnt != 0) {
+                rx[rx_cnt++] = b;
+            } else if (b == 0xFB) {
+                rx[rx_cnt++] = b;
+            }
+            if (rx_cnt == 5) {
+                printf("[MKS][F1] RX: ");
+                for (int i = 0; i < 5; i++) printf("%02X ", rx[i]);
+                printf("\r\n");
+                if (rx[4] == MksServo_GetCheckSum(rx, 4) && rx[2] == 0xF1) {
+                    uint8_t status = rx[3];
+                    printf("[MKS][F1] Status: %d\r\n", status);
+                    return status;
+                } else {
+                    printf("[MKS][F1] Unexpected packet or CRC error\r\n");
+                }
+                rx_cnt = 0;
+            }
+        }
+    }
+    printf("[MKS][F1] Timeout waiting for F1 response\r\n");
+    return 0;
 }

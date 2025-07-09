@@ -42,8 +42,16 @@ private:
     uint16_t homeValue;
     bool homePositionSet;
 };
+// Структура для хранения показаний энкодера (дополнительное значение)
+typedef struct
+{
+    int64_t last_scan_point;  // Последняя точка сканирования
+    int64_t entry_scan_point; // Точка входа в сканирование
+} EncoderScanPoints;
+
 extern StateMachine stateMachine; // Экземпляр stateMachine
 extern AngleSetting mode_scan; // Глобальная переменная для установки угла
+extern EncoderScanPoints encoderScanPoints; // Глобальная переменная для хранения точек сканирования
 void StateMachine_loop(void);
 void StateMachine_setup(void);
 

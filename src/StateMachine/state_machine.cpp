@@ -70,6 +70,13 @@ const char *stateToStr(State state)
     }
 }
 
+#define ENTRY_SCAN_BLOCK_MS 100 // Время блокировки повторной записи entry_scan_point (мс)
+
+
+
+// Глобальный экземпляр структуры для хранения значений энкодера
+EncoderScanPoints encoderScanPoints = {0, 0};
+
 void StateMachine_loop(void)
 {
     DoubleButtonEvent updateDoubleButtons = updateDoubleButtonsState(false);
@@ -98,6 +105,7 @@ void StateMachine_loop(void)
 
         printf("[DBN] Double button long press\n");
     }
+   
     static bool flag_blocked_for_debounce = 0; // Флаг блокировки Scan
     static uint32_t debounce_timer = 0;
     static int last_speed = 0;     // Последняя скорость для ANGLE_ADJUST
@@ -209,44 +217,46 @@ void StateMachine_loop(void)
             if ((buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON) &&
                 !flag_blocked_for_debounce)
             {
-                // Сохраняем текущую позицию как домашнюю перед входом в Scan
-                int32_t carry = 0;
-                uint16_t value = 0;
-
-                // Делаем несколько попыток чтения позиции
-                bool position_read = false;
-                for (int i = 0; i < 5; i++)
-                {
-                    HAL_Delay(10); // Небольшая задержка между попытками
-                    if (MksServo_GetCarry(&mksServo, &carry, &value, 100))
-                    {
-                        position_read = true;
-                        break;
-                    }
-                }
-
-                if (position_read)
-                {
-                    stateMachine.setHomePosition(carry, value);
-                    printf("[FSM] Home position saved: carry=%ld, value=%d\r\n", (long)carry, value);
-                }
-                else
-                {
-                    printf("[FSM] Failed to read position, using fallback!\r\n");
-                    // Используем последние известные значения (если есть)
-                    carry = 0;
-                    value = 0;
-                    stateMachine.setHomePosition(carry, value);
-                }
 
                 stateMachine.setState(State::Scan);
+              
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
+                HAL_Delay(140); // Задержка для стабилизации после остановки
+                // --- Перемещение двигателя в last_scan_point перед ожиданием статуса F5 ---
+                extern uint8_t last_f5_status;
+               
+                extern void reset_last_f5_status();
+                int64_t target = encoderScanPoints.entry_scan_point;
+                printf("[FSM] Moving motor to last_scan_point: %lld\n", target);
+                uint8_t move_ok = MksServo_AbsoluteMotionByAxis_F5(&mksServo, &target, 3000);
+                if (!move_ok)
+                {
+                    printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
+                }
+                uint32_t start_wait = HAL_GetTick();
+                const uint32_t timeout_ms = 3000; // например, 3 секунды
+                while (1)
+                {
+                    uint8_t f1_status = MksServo_QueryStatus_F1(&mksServo, 200); // 200 мс на каждый запрос
+                    if (f1_status == 1) // 1 = motor stop
+                    {
+                        printf("[FSM] Motor reached last_scan_point, F1 status: %u\n", f1_status);
+                        break;
+                    }
+                    if (HAL_GetTick() - start_wait > timeout_ms)
+                    {
+                        printf("[FSM] TIMEOUT waiting for F1 status (motor stop)!\n");
+                        break;
+                    }
+                    HAL_Delay(50); // чтобы не спамить запросами
+                }
+                
                 flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
                 nrf_send_long_beep();
-                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                HAL_Delay(10);                                // Короткая пауза для надійності
-                MksServo_CurrentAxisToZero_92(&mksServo);     // Сброс текущей оси в ноль
+                // Короткая пауза для надійності
+                MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
