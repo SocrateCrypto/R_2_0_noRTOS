@@ -365,19 +365,18 @@ int main(void)
         {
           if (!flag_first_run)
           {
-             int64_t add_val = 0;
-          if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-          {
-            encoderScanPoints.entry_scan_point = add_val;
-            printf("[ENC] Entry scan point set: %lld\n", add_val);
+            int64_t add_val = 0;
+            if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
+            {
+              encoderScanPoints.entry_scan_point = add_val;
+              printf("[ENC] Entry scan point set: %lld\n", add_val);
+            }
+            else
+            {
+              printf("[ENC] Failed to read entry scan point!\n");
+            }
           }
-          else
-          {
-            printf("[ENC] Failed to read entry scan point!\n");
-          }
-          }
-          
-         
+
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
           printf("[MKS] Servo running left\r\n");
@@ -387,16 +386,16 @@ int main(void)
 
           if (!flag_first_run)
           {
-             int64_t add_val = 0;
-          if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-          {
-            encoderScanPoints.entry_scan_point = add_val;
-            printf("[ENC] Entry scan point set: %lld\n", add_val);
-          }
-          else
-          {
-            printf("[ENC] Failed to read entry scan point!\n");
-          }
+            int64_t add_val = 0;
+            if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
+            {
+              encoderScanPoints.entry_scan_point = add_val;
+              printf("[ENC] Entry scan point set: %lld\n", add_val);
+            }
+            else
+            {
+              printf("[ENC] Failed to read entry scan point!\n");
+            }
           }
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
@@ -407,7 +406,18 @@ int main(void)
           // Обидві педалі відпущені - зупиняємо двигун
           flag_first_run = false;
           MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
-
+          HAL_Delay(100);
+          int64_t add_val = 0;
+          // невелика затримка для стабільності
+          if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
+          {
+            encoderScanPoints.entry_scan_point = add_val;
+            printf("[ENC] Entry scan point set: %lld\n", add_val);
+          }
+          else
+          {
+            printf("[ENC] Failed to read entry scan point!\n");
+          }
           printf("[MKS] Servo stopped (antibouce)\r\n");
         }
       }
@@ -468,11 +478,16 @@ int main(void)
             {
               printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
               // Определяем ближайшую границу и направление
-              if (addition_init >= limit_ticks) {
+              if (addition_init >= limit_ticks)
+              {
                 direction = 0; // едем влево
-              } else if (addition_init <= -limit_ticks) {
+              }
+              else if (addition_init <= -limit_ticks)
+              {
                 direction = 1; // едем вправо
-              } else {
+              }
+              else
+              {
                 // Находимся между границами — выбираем ближайшую
                 direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
               }

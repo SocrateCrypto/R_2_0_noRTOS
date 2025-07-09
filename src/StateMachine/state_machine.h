@@ -60,6 +60,7 @@ extern "C" {
 #endif
 extern uint8_t scan_blocked;
 extern uint32_t scan_blocked_timer;
+
 #ifdef __cplusplus
 }
 #endif

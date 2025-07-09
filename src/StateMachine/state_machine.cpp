@@ -7,6 +7,8 @@
 #include "MksServo/MksDriver_allinone.h"
 #include "NRF/nrf.h" // Добавляем для функций привязки
 #include <stdio.h>
+
+bool isSynchronized = false; // синхронно ли нажаты педали 
 AngleSetting mode_scan = ANGLE_SCAN;
 StateMachine::StateMachine() : currentState(State::Initial), homeCarry(0), homeValue(0), homePositionSet(false) {}
 
@@ -113,6 +115,49 @@ void StateMachine_loop(void)
 
     if (updateButtonsState())
     {
+
+  static uint32_t first_btn_press_time = 0;
+    static uint8_t first_btn = 0; // 1 - left, 2 - right
+    static uint8_t double_btn_sync_checked = 0;
+    // Проверка асинхронности двойного нажатия
+    if (!double_btn_sync_checked) {
+        if (buttonsState.turn_left == BUTTON_ON && first_btn == 0) {
+            first_btn_press_time = HAL_GetTick();
+            first_btn = 1;
+        } else if (buttonsState.turn_right == BUTTON_ON && first_btn == 0) {
+            first_btn_press_time = HAL_GetTick();
+            first_btn = 2;
+        }
+        // Если вторая кнопка нажата
+        if (first_btn == 1 && buttonsState.turn_right == BUTTON_ON) {
+            uint32_t dt = HAL_GetTick() - first_btn_press_time;
+            if (dt < 400) {
+                printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
+                isSynchronized = true; // Устанавливаем флаг синхронизации
+            } else {
+                printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
+                isSynchronized = false; // Сброс флага синхронизации
+            }
+            double_btn_sync_checked = 1;
+        } else if (first_btn == 2 && buttonsState.turn_left == BUTTON_ON) {
+            uint32_t dt = HAL_GetTick() - first_btn_press_time;
+            if (dt < 400) {
+                printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
+                isSynchronized = true; // Устанавливаем флаг синхронизации
+            } else {
+                printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
+                isSynchronized = false; // Сброс флага синхронизации
+            }
+            double_btn_sync_checked = 1;
+        }
+    }
+    // Сброс при отпускании обеих кнопок
+    if (buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) {
+        first_btn = 0;
+        first_btn_press_time = 0;
+        double_btn_sync_checked = 0;
+    }
+
         // 1. Приоритет: CalibrateAndBind
         // Вывод значения потенциометра в процентах
         printf("[FSM] Potentiometer: %d%%\n", getPotentiometerValuePercentage());
@@ -234,12 +279,18 @@ void StateMachine_loop(void)
                //     printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
                // }
               // HAL_Delay(500);
-                MksServo_AbsoluteMotionByAxis_F5(&mksServo, &encoderScanPoints.entry_scan_point, 2000);
+              if (isSynchronized)
+              {
+                MksServo_AbsoluteMotionByAxis_F5(&mksServo, &encoderScanPoints.entry_scan_point, 1000);
+              }
+              
+                
                 flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
                 nrf_send_long_beep();
                 // Короткая пауза для надійності
+                HAL_Delay(100); // Задержка для предотвращения дребезга
                 MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
@@ -288,6 +339,7 @@ void StateMachine_loop(void)
             flag_blocked_for_debounce = 0;
         }
     }
+  
 }
 
 void StateMachine_setup(void)
