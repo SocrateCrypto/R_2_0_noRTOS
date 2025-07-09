@@ -464,9 +464,18 @@ int main(void)
             }
             limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
             int64_t addition_init = 0;
-            if (MksServo_GetAdditionValue(&mksServo, &addition_init, 100))
+            if (MksServo_GetAdditionValue(&mksServo, &addition_init, 500))
             {
               printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
+              // Определяем ближайшую границу и направление
+              if (addition_init >= limit_ticks) {
+                direction = 0; // едем влево
+              } else if (addition_init <= -limit_ticks) {
+                direction = 1; // едем вправо
+              } else {
+                // Находимся между границами — выбираем ближайшую
+                direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
+              }
             }
             else
             {
@@ -477,8 +486,8 @@ int main(void)
             uint8_t pot = getPotentiometerValuePercentage();
             int speed = pot * 6 + 50;
             last_speed = speed;
-            MksServo_SpeedModeRun(&mksServo, 1, speed, 250);
-            printf("[SCAN] Start right, limit=%ld (encoder ticks), speed=%d\n", (long)limit_ticks, speed);
+            MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+            printf("[SCAN] Start %s, limit=%ld (encoder ticks), speed=%d\n", direction ? "right" : "left", (long)limit_ticks, speed);
             last_speed_update = now;
             last_carry_poll = now;
             state = FSM_MOVING;

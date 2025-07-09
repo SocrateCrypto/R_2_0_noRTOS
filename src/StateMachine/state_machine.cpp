@@ -221,36 +221,20 @@ void StateMachine_loop(void)
                 stateMachine.setState(State::Scan);
               
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
-                HAL_Delay(140); // Задержка для стабилизации после остановки
+                HAL_Delay(100); // Задержка для стабилизации после остановки
                 // --- Перемещение двигателя в last_scan_point перед ожиданием статуса F5 ---
-                extern uint8_t last_f5_status;
-               
-                extern void reset_last_f5_status();
-                int64_t target = encoderScanPoints.entry_scan_point;
-                printf("[FSM] Moving motor to last_scan_point: %lld\n", target);
-                uint8_t move_ok = MksServo_AbsoluteMotionByAxis_F5(&mksServo, &target, 3000);
-                if (!move_ok)
-                {
-                    printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
-                }
-                uint32_t start_wait = HAL_GetTick();
-                const uint32_t timeout_ms = 3000; // например, 3 секунды
-                while (1)
-                {
-                    uint8_t f1_status = MksServo_QueryStatus_F1(&mksServo, 200); // 200 мс на каждый запрос
-                    if (f1_status == 1) // 1 = motor stop
-                    {
-                        printf("[FSM] Motor reached last_scan_point, F1 status: %u\n", f1_status);
-                        break;
-                    }
-                    if (HAL_GetTick() - start_wait > timeout_ms)
-                    {
-                        printf("[FSM] TIMEOUT waiting for F1 status (motor stop)!\n");
-                        break;
-                    }
-                    HAL_Delay(50); // чтобы не спамить запросами
-                }
                 
+               
+                
+                //int64_t target = encoderScanPoints.entry_scan_point;
+                //printf("[FSM] Moving motor to last_scan_point: %lld\n", target);
+                //uint8_t move_ok = MksServo_AbsoluteMotionByAxis_F5(&mksServo, &target, 3000);
+                //if (!move_ok)
+               // {
+               //     printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
+               // }
+              // HAL_Delay(500);
+                MksServo_AbsoluteMotionByAxis_F5(&mksServo, &encoderScanPoints.entry_scan_point, 2000);
                 flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку

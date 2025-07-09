@@ -622,9 +622,12 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
 
 uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms)
 {
+    // Очистка буфера приема перед отправкой команды
+    servo->rx_head = 0;
+    servo->rx_tail = 0;
     uint8_t tx[11];
-    uint16_t speed = 100;
-    uint8_t acc = 200;
+    uint16_t speed = 700;
+    uint8_t acc = 255;
     int32_t absAxis = (int32_t)(*addition_value);
     tx[0] = 0xFA;
     tx[1] = servo->device_address;
@@ -652,7 +655,7 @@ uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_va
         printf("\r\n");
         uint32_t wait_start = HAL_GetTick();
         rx_cnt = 0;
-        while ((HAL_GetTick() - wait_start) < 200) {
+        while ((HAL_GetTick() - wait_start) < 200 && (HAL_GetTick() - start) < timeout_ms) {
             uint8_t b;
             if (MksServo_RxGetByte(servo, &b)) {
                 if (rx_cnt != 0) {
@@ -670,43 +673,16 @@ uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_va
                             last_f5_status = status;
                             printf("[MKS][F5] Status: %d\r\n", status);
                             if (status == 1) {
-                                // Движение начато, теперь ждать завершения как обычно
-                                uint32_t run_start = HAL_GetTick();
-                                uint8_t confirmed = 0;
-                                while ((HAL_GetTick() - run_start) < 3000) { // run_timeout 3 сек
-                                    uint8_t b2;
-                                    uint8_t rx2[5];
-                                    uint8_t rx2_cnt = 0;
-                                    while (MksServo_RxGetByte(servo, &b2)) {
-                                        if (rx2_cnt != 0) {
-                                            rx2[rx2_cnt++] = b2;
-                                        } else if (b2 == 0xFB) {
-                                            rx2[rx2_cnt++] = b2;
-                                        }
-                                        if (rx2_cnt == 5) {
-                                            if (rx2[4] == MksServo_GetCheckSum(rx2, 4) && rx2[2] == 0xF5) {
-                                                uint8_t st2 = rx2[3];
-                                                last_f5_status = st2;
-                                                printf("[MKS][F5] Status: %d\r\n", st2);
-                                                if (st2 == 2 || st2 == 3) {
-                                                    printf("[MKS][F5] Motion complete (status %d)\r\n", st2);
-                                                    return 1;
-                                                }
-                                            }
-                                            rx2_cnt = 0;
-                                        }
-                                    }
-                                }
-                                printf("[MKS][F5] Timeout waiting for F5 run complete, but motion started.\r\n");
-                                return 1; // <--- теперь возвращаем успех, если движение началось
+                                // Движение начато — сразу успех
+                                return 1;
                             }
                             if (status == 2 || status == 3) {
                                 printf("[MKS][F5] Motion complete (status %d)\r\n", status);
                                 return 1;
                             }
                             if (status == 0) {
-                                printf("[MKS][F5] Unexpected status: 0, retrying after 40ms\r\n");
-                                HAL_Delay(40);
+                                printf("[MKS][F5] Unexpected status: 0, retrying after 20ms\r\n");
+                                HAL_Delay(20);
                                 break;
                             }
                             printf("[MKS][F5] Unexpected status: %d\r\n", status);
@@ -730,6 +706,7 @@ uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_va
                 }
             }
         }
+        if ((HAL_GetTick() - start) >= timeout_ms) break;
     }
     printf("[MKS][F5] Timeout waiting for F5 response\r\n");
     if (last_nonf5_code) {
