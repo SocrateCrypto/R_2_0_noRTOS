@@ -290,7 +290,7 @@ void StateMachine_loop(void)
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
                 nrf_send_long_beep();
                 // Короткая пауза для надійності
-                HAL_Delay(100); // Задержка для предотвращения дребезга
+                HAL_Delay(100); // Задержка 
                 MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
                 printf("[FSM] -> Scan (double_pedal pressed)\n");
             }

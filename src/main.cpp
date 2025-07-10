@@ -32,6 +32,8 @@
 #include "EEPROM/flash_storage.h"
 #include "UserConfig/user_config.h"
 #include "fd_status.h"
+#include "bno055.h"
+#include "bno055_stm32.h"
 #ifdef __cplusplus
 extern "C"
 {
@@ -323,7 +325,47 @@ int main(void)
   {
     printf("Failed to load motor angle from Flash, using default: %d steps\r\n", motor.oscillation_angle);
   }
-  /* Infinite loop */
+  HAL_Delay(100);
+  HAL_GPIO_WritePin(IMU_EN_GPIO_Port, IMU_EN_Pin, GPIO_PIN_SET); // Увімкнення живлення IMU
+
+  bno055_assignI2C(&hi2c1);
+  HAL_Delay(100);
+  bno055_enableExternalCrystal(); // Use external crystal if available
+  HAL_Delay(100);
+  bno055_setup();
+  HAL_Delay(100);
+
+  // Check BNO055 chip ID
+  uint8_t chip_id = 0;
+  bno055_readData(BNO055_CHIP_ID, &chip_id, 1);
+  if (chip_id != 0xA0)
+  {
+    printf("Can't find BNO055, id: 0x%02X. Please check your wiring.\r\n", chip_id);
+    while (1)
+    {
+      HAL_Delay(1000);
+    }
+  }
+  else
+  {
+    printf("BNO055 Chip ID: 0x%02X\r\n", chip_id);
+  }
+
+  bno055_setOperationModeNDOF();
+  HAL_Delay(50);
+
+  uint8_t opmode = 0;
+  bno055_readData(BNO055_OPR_MODE, &opmode, 1);
+  printf("Current OPR_MODE: 0x%02X\r\n", opmode);
+  if (opmode == 0x0C)
+  {
+    printf("NDOF mode set successfully.\r\n");
+  }
+  else
+  {
+    printf("Error: NDOF mode not set!\r\n");
+  }
+
   /* USER CODE BEGIN WHILE */
   while (1)
   {
@@ -423,8 +465,11 @@ int main(void)
       }
       break;
     case State::GiroScope:
-
+    {
+      bno055_vector_t v = bno055_getVectorEuler();
+      printf("Heading: %.2f Roll: %.2f Pitch: %.2f\r\n", v.x, v.y, v.z);
       break;
+    }
     case State::Scan:
     {
       // --- ЛОГІКА СКАНУВАННЯ через структуру-функтор з enum FSM ---
@@ -731,7 +776,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.ClockSpeed = 400000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;

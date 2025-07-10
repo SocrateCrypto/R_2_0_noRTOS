@@ -626,7 +626,7 @@ uint8_t MksServo_AbsoluteMotionByAxis_F5(MksServo_t *servo, int64_t *addition_va
     servo->rx_head = 0;
     servo->rx_tail = 0;
     uint8_t tx[11];
-    uint16_t speed = 700;
+    uint16_t speed = 300;
     uint8_t acc = 255;
     int32_t absAxis = (int32_t)(*addition_value);
     tx[0] = 0xFA;
