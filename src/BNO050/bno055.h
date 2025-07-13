@@ -303,6 +303,40 @@ bno055_vector_t bno055_getVectorGravity();
 bno055_vector_t bno055_getVectorQuaternion();
 void bno055_setAxisMap(bno055_axis_map_t axis);
 
+// New functions for runtime scale selection
+bno055_vector_t bno055_getVectorAccelerometer_scaled(int scale);
+bno055_vector_t bno055_getVectorGyroscope_scaled(int scale);
+
+// Прототипы функций для чтения сырых данных акселерометра и гироскопа
+bno055_vector_t bno055_readRawAccelRegisters(void);
+bno055_vector_t bno055_readRawGyroRegisters(void);
+
+// Возвращает true, если новые данные акселерометра или гироскопа готовы (по INT_STA)
+bool bno055_isDataReady(void);
+
+// Значения диапазонов гироскопа (см. даташит BNO055, регистр GYRO_CONFIG_0)
+#define BNO055_GYRO_RANGE_2000DPS 0x00 // ±2000 dps
+#define BNO055_GYRO_RANGE_1000DPS 0x01 // ±1000 dps
+#define BNO055_GYRO_RANGE_500DPS  0x02 // ±500 dps
+#define BNO055_GYRO_RANGE_250DPS  0x03 // ±250 dps
+#define BNO055_GYRO_RANGE_125DPS  0x04 // ±125 dps
+
+// Значения диапазонов акселерометра (см. даташит BNO055, регистр ACC_CONFIG)
+#define BNO055_ACCEL_RANGE_2G  0x00 // ±2g
+#define BNO055_ACCEL_RANGE_4G  0x01 // ±4g
+#define BNO055_ACCEL_RANGE_8G  0x02 // ±8g
+#define BNO055_ACCEL_RANGE_16G 0x03 // ±16g
+
+// Функции для смены диапазона (чувствительности) гироскопа и акселерометра
+void bno055_setGyroRange(uint8_t range);
+void bno055_setAccelRange(uint8_t range);
+
+// Новые функции для установки bandwidth акселерометра и гироскопа
+void bno055_setAccelBandwidth(uint8_t bw);
+void bno055_setGyroBandwidth(uint8_t bw);
+void bno055_setPage(uint8_t page);
+void bno055_enableGyroDataReadyInterrupt(void);
+uint8_t bno055_getIntStatus(void);
 #ifdef __cplusplus
   }
 #endif

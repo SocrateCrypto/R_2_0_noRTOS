@@ -88,10 +88,15 @@ void Error_Handler(void);
 #define IRQ_Pin GPIO_PIN_9
 #define IRQ_GPIO_Port GPIOB
 #define IRQ_EXTI_IRQn EXTI9_5_IRQn
+#define PB3_INT_Pin GPIO_PIN_3
+#define PB3_INT_GPIO_Port GPIOB
+#define PB3_INT_EXTI_IRQn EXTI3_IRQn
 
 /* USER CODE BEGIN Private defines */
 // Флаг прерывания от NRF24
 extern volatile uint8_t irq;
+// Флаг прерывания от PB3
+extern volatile uint8_t pb3_int_flag;
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

@@ -23,6 +23,7 @@
 #include <string.h>
 #include <math.h>
 #include <inttypes.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "MksServo/MksDriver_allinone.h"
@@ -38,12 +39,13 @@
 extern "C"
 {
 #endif
-
+#include "AHRS_algorithm/Fusion.h"
 #include "NRF/NRF24.h"
 #include "NRF/NRF24_conf.h"
 #include "NRF/NRF24_reg_addresses.h"
 #include "NRF/nrf.h"
 #include "Potentiometr/Potentiometer.h"
+#include "Float_transform/Float_transform.h"
 
   // Оголошення зовнішньої змінної irq
   extern volatile uint8_t irq;
@@ -202,8 +204,33 @@ Zero_StatusEnum last_zero_status_enum = ZERO_STATUS_UNKNOWN;
 uint8_t last_f5_status = 255; // Глобальна змінна для статусу F5
 uint8_t last_f6_status = 0;
 void reset_last_f6_status(void) { last_f6_status = 0; }
-/* USER CODE END 0 */
 
+// === DWT (Data Watchpoint and Trace) for microsecond timing ===
+static inline void DWT_Init(void)
+{
+  if (!(CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk))
+  {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  }
+  DWT->CYCCNT = 0;
+  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
+static inline uint32_t micros(void)
+{
+  return (uint32_t)(DWT->CYCCNT / (HAL_RCC_GetHCLKFreq() / 1000000));
+}
+// ===================================================================
+/* USER CODE END 0 */
+// Функция для нормализации угла в диапазоне [−180, 180] градусов
+float normalizeAngle(float angle)
+{
+  while (angle > 180)
+    angle -= 360;
+  while (angle < -180)
+    angle += 360;
+  return angle;
+}
 /**
  * @brief  Точка входу в додаток.
  * @retval int
@@ -212,7 +239,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  float previousYaw = 0;   // Предыдущее значение yaw
+  float cumulativeYaw = 0; // Кумулятивное значение yaw
+  float currentYaw = 0;    // Текущее значение yaw с датчика IMU
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -241,6 +270,10 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   StateMachine_setup(); // Ініціалізація машини станів
+
+  // ================= DWT microsecond timer init =================
+  DWT_Init();
+  // =============================================================
 
   printf("NRF24 RX Test Started\r\n");
   printf("UART1 printf redirection working!\r\n");
@@ -330,12 +363,26 @@ int main(void)
 
   bno055_assignI2C(&hi2c1);
   HAL_Delay(100);
+
   bno055_enableExternalCrystal(); // Use external crystal if available
   HAL_Delay(100);
   bno055_setup();
-  HAL_Delay(100);
+  // === Настройка IMU: спочатку діапазони, потім смуги ===
+  bno055_setAccelRange(BNO055_ACCEL_RANGE_2G); // Максимальна чутливість акселерометра (±2g)
+  HAL_Delay(30);
+  bno055_setGyroRange(BNO055_GYRO_RANGE_250DPS); // Максимальна чутливість гироскопа (±250 dps)
+  HAL_Delay(30);
+  bno055_setAccelBandwidth(0x01); // 31.25 Гц, 1000 Гц обновлення
+  HAL_Delay(30);
+  bno055_setGyroBandwidth(0x04); // 47 Гц, 200 Гц обновлення
+  HAL_Delay(30);
 
-  // Check BNO055 chip ID
+  // === Переводимо IMU в робочий режим ===
+  bno055_setOperationMode(BNO055_OPERATION_MODE_ACCGYRO);
+  HAL_Delay(50);
+  bno055_enableGyroDataReadyInterrupt(); // Увімкнення переривання на нові дані гироскопа
+  HAL_Delay(50);
+  // === Контрольні читання регістрів ===
   uint8_t chip_id = 0;
   bno055_readData(BNO055_CHIP_ID, &chip_id, 1);
   if (chip_id != 0xA0)
@@ -350,23 +397,62 @@ int main(void)
   {
     printf("BNO055 Chip ID: 0x%02X\r\n", chip_id);
   }
+  // Перевіряємо ACC_CONFIG і GYRO_CONFIG_0
+  uint8_t acc_config = 0, gyro_config = 0;
+  bno055_setPage(1);
+  bno055_readData(BNO055_ACC_CONFIG, &acc_config, 1);
+  bno055_readData(BNO055_GYRO_CONFIG_0, &gyro_config, 1);
+  bno055_setPage(0);
+  printf("ACC_CONFIG: 0x%02X, GYRO_CONFIG_0: 0x%02X\r\n", acc_config, gyro_config);
+  /*
+  Расшифровка значений регистров:
 
-  bno055_setOperationModeNDOF();
-  HAL_Delay(50);
+ACC_CONFIG: 0xF8
 
-  uint8_t opmode = 0;
-  bno055_readData(BNO055_OPR_MODE, &opmode, 1);
-  printf("Current OPR_MODE: 0x%02X\r\n", opmode);
-  if (opmode == 0x0C)
-  {
-    printf("NDOF mode set successfully.\r\n");
-  }
-  else
-  {
-    printf("Error: NDOF mode not set!\r\n");
-  }
+Младшие 2 бита (0xF8 & 0x03 = 0): диапазон ±2g (это правильно для максимальной чувствительности).
+Остальные биты — это настройки bandwidth и power mode, что нормально.
+GYRO_CONFIG_0: 0x02
+
+Младшие 3 бита (0x02 & 0x07 = 2): диапазон ±125 dps (это правильно для максимальной чувствительности).
+Вывод:
+Оба регистра установлены корректно:
+
+Акселерометр: ±2g
+Гироскоп: ±125 dps
+  все в порядке, максимальная чувствительность установлена.
+
+  */
 
   /* USER CODE BEGIN WHILE */
+
+  // Define calibration (replace with actual calibration data if available)
+  const FusionMatrix gyroscopeMisalignment = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+  const FusionVector gyroscopeSensitivity = {1.0f, 1.0f, 1.0f}; // значения уже в dps
+  const FusionVector gyroscopeOffset = {0.0f, 0.0f, 0.0f};
+  const FusionMatrix accelerometerMisalignment = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+  const FusionVector accelerometerSensitivity = {1.0f, 1.0f, 1.0f}; // значения уже в g
+  const FusionVector accelerometerOffset = {0.0f, 0.0f, 0.0f};
+  // const FusionMatrix softIronMatrix = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+  // const FusionVector hardIronOffset = {0.0f, 0.0f, 0.0f};
+
+  // Initialise algorithms
+  FusionOffset offset;
+  FusionAhrs ahrs;
+
+  FusionOffsetInitialise(&offset, SAMPLE_RATE);
+  FusionAhrsInitialise(&ahrs);
+
+  // Set AHRS algorithm settings
+  const FusionAhrsSettings settings = {
+      .convention = FusionConventionNwu,
+      .gain = 0.5f,
+      .gyroscopeRange = 2000.0f, /* replace this with actual gyroscope range in degrees/s */
+      .accelerationRejection = 10.0f,
+      .magneticRejection = 10.0f,
+      .recoveryTriggerPeriod = 5 * SAMPLE_RATE, /* 5 seconds */
+  };
+  FusionAhrsSetSettings(&ahrs, &settings);
+
   while (1)
   {
 
@@ -466,8 +552,96 @@ int main(void)
       break;
     case State::GiroScope:
     {
-      bno055_vector_t v = bno055_getVectorEuler();
-      printf("Heading: %.2f Roll: %.2f Pitch: %.2f\r\n", v.x, v.y, v.z);
+      // --- Считывание IMU с частотой 50 Гц (каждые 20 мс) ---
+      static uint32_t last_imu_tick = 0;
+      uint32_t now_tick = HAL_GetTick();
+      if (now_tick - last_imu_tick >= 20) // 20 мс = 50 Гц
+      {
+        last_imu_tick = now_tick;
+        // Acquire latest sensor data
+        // Можно убрать bno055_getIntStatus(), если polling по таймеру
+        // --- Получение и обработка данных IMU ---
+        FusionVector accelerometer, gyroscope;
+        bno055_vector_t acc_vector = bno055_readRawAccelRegisters();
+        accelerometer.axis.x = acc_vector.x / 1000;
+        accelerometer.axis.y = acc_vector.y / 1000;
+        accelerometer.axis.z = acc_vector.z / 1000;
+        bno055_vector_t gyro_vector = bno055_readRawGyroRegisters();
+        gyroscope.axis.x = gyro_vector.x / 128;
+        gyroscope.axis.y = gyro_vector.y / 128;
+        gyroscope.axis.z = gyro_vector.z / 128;
+        //  Apply calibration
+        gyroscope = FusionCalibrationInertial(gyroscope, gyroscopeMisalignment, gyroscopeSensitivity, gyroscopeOffset);
+        accelerometer = FusionCalibrationInertial(accelerometer, accelerometerMisalignment, accelerometerSensitivity, accelerometerOffset);
+        // Update AHRS algorithm
+        static uint32_t previousMicros = 0;
+        float deltaTime = 0.0f;
+        uint32_t nowMicros = micros();
+        if (previousMicros != 0)
+        {
+          uint32_t diff = nowMicros - previousMicros;
+          deltaTime = diff / 1000000.0f;
+        }
+        previousMicros = nowMicros;
+        FusionAhrsUpdate(&ahrs, gyroscope, accelerometer, FUSION_VECTOR_ZERO, deltaTime);
+        FusionQuaternion quaternion_ = FusionAhrsGetQuaternion(&ahrs);
+        FusionEuler euler = FusionQuaternionToEuler(quaternion_);
+        // --- Вывод значений euler через Float_transform раз в секунду ---
+        static uint32_t lastPrintMicros = 0;
+        if (nowMicros - lastPrintMicros >= 1000000) // 1 секунда
+        {
+          lastPrintMicros = nowMicros;
+          uint8_t sign_roll, sign_pitch, sign_yaw;
+          int int_roll, int_pitch, int_yaw;
+          uint32_t frac_roll, frac_pitch, frac_yaw;
+          //  Float_transform(euler.angle.roll, 3, &sign_roll, &int_roll, &frac_roll);
+          //  Float_transform(euler.angle.pitch, 3, &sign_pitch, &int_pitch, &frac_pitch);
+          // Float_transform(euler.angle.yaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
+          // printf("[EULER] Roll: %s%d.%03lu ", sign_roll ? "-" : "", int_roll, frac_roll);
+          //  printf("Pitch: %s%d.%03lu ", sign_pitch ? "-" : "", int_pitch, frac_pitch);
+
+          // Расчет изменения yaw
+          currentYaw = euler.angle.yaw; // Получаем текущее значение yaw
+          float deltaYaw = normalizeAngle(currentYaw - previousYaw);
+
+          // Обновление кумулятивного значения yaw
+          cumulativeYaw += deltaYaw;
+
+          // Обновление предыдущего значения yaw
+          previousYaw = currentYaw;
+          Float_transform(cumulativeYaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
+          printf("Com_Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
+        }
+        // --- Временный вывод сырых значений акселерометра и гироскопа через Float_transform ---
+        static uint32_t lastPrintRawMicros = 0;
+        if (nowMicros - lastPrintRawMicros >= 1000000) // 1 секунда
+        {
+          lastPrintRawMicros = nowMicros;
+          // Акселерометр
+          uint8_t sign_ax, sign_ay, sign_az;
+          int int_ax, int_ay, int_az;
+          uint32_t frac_ax, frac_ay, frac_az;
+          Float_transform(acc_vector.x, 3, &sign_ax, &int_ax, &frac_ax);
+          Float_transform(acc_vector.y, 3, &sign_ay, &int_ay, &frac_ay);
+          Float_transform(acc_vector.z, 3, &sign_az, &int_az, &frac_az);
+         // printf("[RAW ACC] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_ax ? "-" : "", int_ax, frac_ax, sign_ay ? "-" : "", int_ay, frac_ay, sign_az ? "-" : "", int_az, frac_az);
+          // Гироскоп
+          uint8_t sign_gx, sign_gy, sign_gz;
+          int int_gx, int_gy, int_gz;
+          uint32_t frac_gx, frac_gy, frac_gz;
+          Float_transform(gyro_vector.x, 3, &sign_gx, &int_gx, &frac_gx);
+          Float_transform(gyro_vector.y, 3, &sign_gy, &int_gy, &frac_gy);
+          Float_transform(gyro_vector.z, 3, &sign_gz, &int_gz, &frac_gz);
+         // printf("[RAW GYRO] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_gx ? "-" : "", int_gx, frac_gx, sign_gy ? "-" : "", int_gy, frac_gy, sign_gz ? "-" : "", int_gz, frac_gz);
+          // --- Вывод модуля вектора ускорения (acc_norm) ---
+          float acc_norm = sqrtf(acc_vector.x * acc_vector.x + acc_vector.y * acc_vector.y + acc_vector.z * acc_vector.z);
+          uint8_t sign_accnorm;
+          int int_accnorm;
+          uint32_t frac_accnorm;
+          Float_transform(acc_norm, 3, &sign_accnorm, &int_accnorm, &frac_accnorm);
+          //printf("|acc|: %s%d.%03lu\n", sign_accnorm ? "-" : "", int_accnorm, frac_accnorm);
+        }
+      }
       break;
     }
     case State::Scan:
@@ -982,6 +1156,19 @@ static void MX_GPIO_Init(void)
   /* Налаштування піну : IRQ_Pin */
   GPIO_InitStruct.Pin = IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /* Налаштування пінів : LEFT_Pin RIGHT_Pin */
+  GPIO_InitStruct.Pin = LEFT_Pin | RIGHT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* Налаштування піну : IRQ_Pin */
+  GPIO_InitStruct.Pin = IRQ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL; // ВИПРАВЛЕННЯ: прибираємо pull-up, оскільки IRQ вже підтягнутий на платі
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
@@ -995,6 +1182,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN; // ВИПРАВЛЕННЯ: додаємо pull-down для DERE
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  // --- Настройка PB3 як вход з прерыванием по спаду ---
+  GPIO_InitStruct.Pin = PB3_INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(PB3_INT_GPIO_Port, &GPIO_InitStruct);
+  HAL_NVIC_SetPriority(PB3_INT_EXTI_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(PB3_INT_EXTI_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -1410,4 +1605,16 @@ extern "C"
 void reset_last_f5_status()
 {
   last_f5_status = 255;
+}
+
+// Глобальна змінна для сигналізації про переривання на PB3
+volatile uint8_t pb3_int_flag = 0;
+
+void EXTI3_IRQHandler(void)
+{
+  if (__HAL_GPIO_EXTI_GET_IT(PB3_INT_Pin) != RESET)
+  {
+    __HAL_GPIO_EXTI_CLEAR_IT(PB3_INT_Pin);
+    pb3_int_flag = 1;
+  }
 }
