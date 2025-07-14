@@ -47,6 +47,9 @@ typedef struct
 {
     int64_t last_scan_point;  // Последняя точка сканирования
     int64_t entry_scan_point; // Точка входа в сканирование
+    int64_t giro_point;  // Точка входа в режим гироскопа
+    float cumulativeYaw; // Накопленный угол поворота
+    bool flag_first_run; // Флаг первого запуска педали
 } EncoderScanPoints;
 
 extern StateMachine stateMachine; // Экземпляр stateMachine

@@ -200,13 +200,22 @@ void StateMachine_loop(void)
             stateMachine.setState(State::GiroScope);
             printf("[FSM] -> GiroScope\n");
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET);
+            int64_t add_val = 0;
+            MksServo_GetAdditionValue(&mksServo, &add_val, 100);
+            encoderScanPoints.giro_point = add_val;
+           // encoderScanPoints.cumulativeYaw =cumulativeYaw; // Сохраняем накопленный угол поворота
+            encoderScanPoints.flag_first_run = true; // Устанавливаем флаг первого запуска
+            // PID.reset();
         }
         // 5. Если были в GiroScope и gyro отпущена — вернуться в Manual
         else if (stateMachine.is(State::GiroScope) && buttonsState.gyro == BUTTON_OFF)
         {
+              MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); 
             stateMachine.setState(State::Manual);
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
-            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250);              // stop servo
+                       // stop servo
+            HAL_Delay(100); // Задержка для стабилизации после остановки
+             MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);              // stop servo
             printf("[FSM] -> Manual (from GiroScope)\n");
         }
         // 6. Если были в Calibrate/Bind/CalibrateAndBind и gyro нажата — возврат в GiroScope

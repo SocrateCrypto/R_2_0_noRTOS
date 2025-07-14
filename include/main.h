@@ -51,9 +51,8 @@ extern "C" {
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
-
 /* USER CODE BEGIN EFP */
-
+uint64_t micros(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -99,8 +98,14 @@ extern volatile uint8_t irq;
 extern volatile uint8_t pb3_int_flag;
 /* USER CODE END Private defines */
 
+
+
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef __cplusplus
+extern float cumulativeYaw; // Глобальная переменная для накопления угла поворота
 #endif
 
 #endif /* __MAIN_H */
