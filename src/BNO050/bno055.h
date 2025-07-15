@@ -337,6 +337,8 @@ void bno055_setGyroBandwidth(uint8_t bw);
 void bno055_setPage(uint8_t page);
 void bno055_enableGyroDataReadyInterrupt(void);
 uint8_t bno055_getIntStatus(void);
+void bno055_setGyroConfig(uint8_t range, uint8_t bw);
+void bno055_setAccelConfig(uint8_t range, uint8_t bw);
 #ifdef __cplusplus
   }
 #endif

@@ -573,6 +573,9 @@ uint8_t MksServo_GetCarry(MksServo_t *servo, int32_t *carry, uint16_t *value, ui
 
 // Чтение addition value (команда 0x31)
 uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, uint32_t timeout_ms) {
+    // Очистка кольцевого буфера перед отправкой команды
+    servo->rx_head = 0;
+    servo->rx_tail = 0;
     uint8_t tx[4];
     tx[0] = 0xFA;
     tx[1] = servo->device_address;
@@ -582,7 +585,8 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
     HAL_Delay(1);
     HAL_UART_Transmit(servo->huart, tx, 4, 100);
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
-
+    // Короткая задержка для стабильности
+    HAL_Delay(2);
     // Ожидаем ответ: FB addr 31 [addition_value(6)] CRC
     uint8_t rx[11];
     uint32_t start = HAL_GetTick();
@@ -608,7 +612,7 @@ uint8_t MksServo_GetAdditionValue(MksServo_t *servo, int64_t *addition_value, ui
                         if (rx[3] & 0x80) {
                             *addition_value |= (int64_t)0xFFFF000000000000;
                         }
-                        printf("[MKS] Encoder addition value: %" PRId64 "\r\n", *addition_value);
+                       // printf("[MKS] Encoder addition value: 0x%08lX%08lX\r\n", (uint32_t)((*addition_value >> 32) & 0xFFFFFFFF), (uint32_t)(*addition_value & 0xFFFFFFFF));
                         return 1;
                     }
                 }

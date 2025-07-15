@@ -325,11 +325,15 @@ void bno055_setGyroRange(uint8_t range) {
     bno055_opmode_t prevMode = bno055_getOperationMode();
     bno055_setOperationModeConfig();
     bno055_setPage(1);
+    bno055_delay(5); // небольшая задержка после перехода в конфиг
     // Сохраняем остальные биты регистра
     uint8_t reg = 0;
     bno055_readData(BNO055_GYRO_CONFIG_0, &reg, 1);
+    bno055_delay(2); // задержка после чтения
     reg = (reg & ~0x07) | (range & 0x07); // Младшие 3 бита - диапазон
     bno055_writeData(BNO055_GYRO_CONFIG_0, reg);
+    printf("[BNO055] Write GYRO_CONFIG_0 value: 0x%02X\n", reg);
+    bno055_delay(2); // задержка после записи
     // Обновляем переменную масштаба
     switch (range & 0x07) {
         case BNO055_GYRO_RANGE_2000DPS: angularRateScale = 16; break;
@@ -340,7 +344,10 @@ void bno055_setGyroRange(uint8_t range) {
         default: angularRateScale = 16; break;
     }
     bno055_setPage(0);
+    bno055_delay(2); // задержка после возврата страницы
     bno055_setOperationMode(prevMode);
+    bno055_delay(5); // задержка после возврата режима
+    printf("setGyroRange arg: 0x%02X\n", range);
 }
 
 // Новая функция: установка bandwidth акселерометра (биты 2-4 ACC_CONFIG)
@@ -384,11 +391,15 @@ void bno055_setAccelRange(uint8_t range) {
     bno055_opmode_t prevMode = bno055_getOperationMode();
     bno055_setOperationModeConfig();
     bno055_setPage(1);
+    bno055_delay(5); // небольшая задержка после перехода в конфиг
     // Сохраняем остальные биты регистра
     uint8_t reg = 0;
     bno055_readData(BNO055_ACC_CONFIG, &reg, 1);
+    bno055_delay(2); // задержка после чтения
     reg = (reg & ~0x03) | (range & 0x03); // Младшие 2 бита - диапазон
     bno055_writeData(BNO055_ACC_CONFIG, reg);
+    printf("[BNO055] Write ACC_CONFIG value: 0x%02X\n", reg);
+    bno055_delay(2); // задержка после записи
     // Обновляем переменную масштаба
     switch (range & 0x03) {
         case BNO055_ACCEL_RANGE_2G:  accelScale = 100; break; // 1 m/s^2 = 100 LSB
@@ -398,7 +409,10 @@ void bno055_setAccelRange(uint8_t range) {
         default: accelScale = 100; break;
     }
     bno055_setPage(0);
+    bno055_delay(2); // задержка после возврата страницы
     bno055_setOperationMode(prevMode);
+    bno055_delay(5); // задержка после возврата режима
+    printf("setAccelRange arg: 0x%02X\n", range);
 }
 
 // --- Включение прерывания по Data Ready гироскопа (INT) ---
@@ -472,4 +486,58 @@ bool bno055_isDataReady(void) {
     bno055_readData(0x37, &int_sta, 1);
     // Можно проверять оба бита, если нужен любой из датчиков:
     return (int_sta & 0x03) != 0;
+}
+
+void bno055_setGyroConfig(uint8_t range, uint8_t bw) {
+    bno055_opmode_t prevMode = bno055_getOperationMode();
+    bno055_setOperationModeConfig();
+    bno055_setPage(1);
+    bno055_delay(5);
+    uint8_t reg = 0;
+    // Формируем полный байт: [5:3] - фильтр, [2:0] - диапазон
+    reg = ((bw & 0x07) << 3) | (range & 0x07);
+    bno055_writeData(BNO055_GYRO_CONFIG_0, reg);
+    printf("[BNO055] Write GYRO_CONFIG_0 value: 0x%02X (range: 0x%02X, bw: 0x%02X)\n", reg, range, bw);
+    bno055_delay(2);
+    // Обновляем переменную масштаба
+    switch (range & 0x07) {
+        case BNO055_GYRO_RANGE_2000DPS: angularRateScale = 16; break;
+        case BNO055_GYRO_RANGE_1000DPS: angularRateScale = 32; break;
+        case BNO055_GYRO_RANGE_500DPS:  angularRateScale = 64; break;
+        case BNO055_GYRO_RANGE_250DPS:  angularRateScale = 128; break;
+        case BNO055_GYRO_RANGE_125DPS:  angularRateScale = 256; break;
+        default: angularRateScale = 16; break;
+    }
+    bno055_setPage(0);
+    bno055_delay(2);
+    bno055_setOperationMode(prevMode);
+    bno055_delay(5);
+    printf("setGyroConfig args: range=0x%02X, bw=0x%02X\n", range, bw);
+}
+
+// Новая функция: установка диапазона и bandwidth акселерометра
+void bno055_setAccelConfig(uint8_t range, uint8_t bw) {
+    bno055_opmode_t prevMode = bno055_getOperationMode();
+    bno055_setOperationModeConfig();
+    bno055_setPage(1);
+    bno055_delay(5);
+    uint8_t reg = 0;
+    // Формируем полный байт: [4:2] - фильтр, [1:0] - диапазон
+    reg = ((bw & 0x07) << 2) | (range & 0x03);
+    bno055_writeData(BNO055_ACC_CONFIG, reg);
+    printf("[BNO055] Write ACC_CONFIG value: 0x%02X (range: 0x%02X, bw: 0x%02X)\n", reg, range, bw);
+    bno055_delay(2);
+    // Обновляем переменную масштаба
+    switch (range & 0x03) {
+        case BNO055_ACCEL_RANGE_2G:  accelScale = 100; break;
+        case BNO055_ACCEL_RANGE_4G:  accelScale = 50; break;
+        case BNO055_ACCEL_RANGE_8G:  accelScale = 25; break;
+        case BNO055_ACCEL_RANGE_16G: accelScale = 12; break;
+        default: accelScale = 100; break;
+    }
+    bno055_setPage(0);
+    bno055_delay(2);
+    bno055_setOperationMode(prevMode);
+    bno055_delay(5);
+    printf("setAccelConfig args: range=0x%02X, bw=0x%02X\n", range, bw);
 }

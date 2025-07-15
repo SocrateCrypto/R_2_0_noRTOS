@@ -1,9 +1,9 @@
 #ifndef PID_H
 #define PID_H
-#define PID_KP 35.0f
+#define PID_KP 45.0f
 #define PID_KI 1.0f
 #define PID_KD 1.0f
-#define PID_RAMP 1800.0f
+#define PID_RAMP 2000.0f
 #define PID_LIMIT 250.0f
 #include "math.h"
 #include "main.h"

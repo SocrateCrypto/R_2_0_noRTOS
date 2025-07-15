@@ -370,37 +370,32 @@ int main(void)
   HAL_Delay(100);
   bno055_setup();
   // === Настройка IMU: спочатку діапазони, потім смуги ===
-  bno055_setAccelRange(BNO055_ACCEL_RANGE_2G); // Максимальна чутливість акселерометра (±2g)
+  bno055_setAccelConfig(BNO055_ACCEL_RANGE_2G, 0b010); // 0x01 — фильтр 31.25 Гц (пример) // Максимальна чутливість акселерометра (±2g)
   HAL_Delay(30);
-  bno055_setGyroRange(BNO055_GYRO_RANGE_250DPS); // Максимальна чутливість гироскопа (±250 dps)
+  bno055_setGyroConfig(BNO055_GYRO_RANGE_250DPS, 0b011); // 0x04 — фильтр 47 Гц (пример) // Максимальна чутливість гироскопа (±250 dps)
   HAL_Delay(30);
-  bno055_setAccelBandwidth(0x01); // 31.25 Гц, 1000 Гц обновлення
-  HAL_Delay(30);
-  bno055_setGyroBandwidth(0x04); // 47 Гц, 200 Гц обновлення
-  HAL_Delay(30);
+  // Можно раскомментировать и выставить фильтр, если нужно:
+  //bno055_setAccelBandwidth(0x01); // 31.25 Гц, 1000 Гц обновления
+  //HAL_Delay(30);
+  //bno055_setGyroBandwidth(0x04); // 47 Гц, 200 Гц обновления
+  //HAL_Delay(30);
+
+  // === Контрольные чтения регистров після установки діапазонів ===
+  uint8_t acc_config = 0, gyro_config = 0;
+  bno055_setPage(1);
+  bno055_readData(BNO055_ACC_CONFIG, &acc_config, 1);
+  bno055_readData(BNO055_GYRO_CONFIG_0, &gyro_config, 1);
+  bno055_setPage(0);
+  printf("ACC_CONFIG after set: 0x%02X\n", acc_config);
+  printf("GYRO_CONFIG_0 after set: 0x%02X\n", gyro_config);
 
   // === Переводимо IMU в робочий режим ===
   bno055_setOperationMode(BNO055_OPERATION_MODE_ACCGYRO);
   HAL_Delay(50);
-  bno055_enableGyroDataReadyInterrupt(); // Увімкнення переривання на нові дані гироскопа
-  HAL_Delay(50);
+ // bno055_enableGyroDataReadyInterrupt(); // Увімкнення переривання на нові дані гироскопа
+ // HAL_Delay(50);
   // === Контрольні читання регістрів ===
-  uint8_t chip_id = 0;
-  bno055_readData(BNO055_CHIP_ID, &chip_id, 1);
-  if (chip_id != 0xA0)
-  {
-    printf("Can't find BNO055, id: 0x%02X. Please check your wiring.\r\n", chip_id);
-    while (1)
-    {
-      HAL_Delay(1000);
-    }
-  }
-  else
-  {
-    printf("BNO055 Chip ID: 0x%02X\r\n", chip_id);
-  }
-  // Перевіряємо ACC_CONFIG і GYRO_CONFIG_0
-  uint8_t acc_config = 0, gyro_config = 0;
+  // Повторно використовуемо acc_config и gyro_config, не объявляем их заново
   bno055_setPage(1);
   bno055_readData(BNO055_ACC_CONFIG, &acc_config, 1);
   bno055_readData(BNO055_GYRO_CONFIG_0, &gyro_config, 1);
@@ -453,7 +448,7 @@ GYRO_CONFIG_0: 0x02
       .magneticRejection = 10.0f,
       .recoveryTriggerPeriod = 5 * SAMPLE_RATE, /* 5 seconds */
   };
-  FusionAhrsSetSettings(&ahrs, &settings);
+  //FusionAhrsSetSettings(&ahrs, &settings);
   PIDController PID(PID_KP, PID_KI, PID_KD, PID_RAMP, PID_LIMIT);
 
   while (1)
@@ -482,36 +477,46 @@ GYRO_CONFIG_0: 0x02
       gyroscope.axis.y = gyro_vector.y / 128;
       gyroscope.axis.z = gyro_vector.z / 128;
       //  Apply calibration
-      gyroscope = FusionCalibrationInertial(gyroscope, gyroscopeMisalignment, gyroscopeSensitivity, gyroscopeOffset);
-      accelerometer = FusionCalibrationInertial(accelerometer, accelerometerMisalignment, accelerometerSensitivity, accelerometerOffset);
+       //const FusionVector gyroscope = {gyroscope.axis.x, gyroscope.axis.y,  gyroscope.axis.z}; // replace this with actual gyroscope data in degrees/s
+      //  const FusionVector accelerometer = {accelerometer.axis.x, accelerometer.axis.y, accelerometer.axis.z}; // replace this with actual accelerometer data in g
+      //gyroscope = FusionCalibrationInertial(gyroscope, gyroscopeMisalignment, gyroscopeSensitivity, gyroscopeOffset);
+      //accelerometer = FusionCalibrationInertial(accelerometer, accelerometerMisalignment, accelerometerSensitivity, accelerometerOffset);
       // Update AHRS algorithm
-      static uint32_t previousMicros = 0;
+      static uint32_t previousTick = 0;
       float deltaTime = 0.0f;
-      uint32_t nowMicros = micros();
-      if (previousMicros != 0)
+      uint32_t now_tick_dt = HAL_GetTick();
+      if (previousTick != 0)
       {
-        uint32_t diff = nowMicros - previousMicros;
-        deltaTime = diff / 1000000.0f;
+        uint32_t diff = now_tick_dt - previousTick;
+        deltaTime = diff / 1000.0f;
+        static float lastDeltaTime = 0.0f;
+        if (lastDeltaTime > 0.0f && (deltaTime > 1.5f * lastDeltaTime || deltaTime < lastDeltaTime / 1.5f)) {
+            printf("[ALARM] deltaTime jump! prev: %.6f, now: %.6f\n", lastDeltaTime, deltaTime);
+        }
+        lastDeltaTime = deltaTime;
       }
-      previousMicros = nowMicros;
-      FusionAhrsUpdate(&ahrs, gyroscope, accelerometer, FUSION_VECTOR_ZERO, deltaTime);
-      FusionQuaternion quaternion_ = FusionAhrsGetQuaternion(&ahrs);
-      FusionEuler euler = FusionQuaternionToEuler(quaternion_);
-      // --- Вывод значений euler через Float_transform раз в секунду ---
-      static uint32_t lastPrintMicros = 0;
-      if (nowMicros - lastPrintMicros >= 1000000) // 1 секунда
-      {
-        lastPrintMicros = nowMicros;
-        // Удаляем неиспользуемые переменные
-        // uint8_t sign_roll, sign_pitch, sign_yaw;
-        // int int_roll, int_pitch, int_yaw;
-        // uint32_t frac_roll, frac_pitch, frac_yaw;
-        //  Float_transform(euler.angle.roll, 3, &sign_roll, &int_roll, &frac_roll);
-        //  Float_transform(euler.angle.pitch, 3, &sign_pitch, &int_pitch, &frac_pitch);
-        // Float_transform(euler.angle.yaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
-        // printf("[EULER] Roll: %s%d.%03lu ", sign_roll ? "-" : "", int_roll, frac_roll);
-        //  printf("Pitch: %s%d.%03lu ", sign_pitch ? "-" : "", int_pitch, frac_pitch);
+      previousTick = now_tick_dt;
+      //FusionAhrsUpdate(&ahrs, gyroscope, accelerometer, FUSION_VECTOR_ZERO, deltaTime);
+        FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer, deltaTime);
 
+        const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
+      //FusionQuaternion quaternion_ = FusionAhrsGetQuaternion(&ahrs);
+     // FusionEuler euler = FusionQuaternionToEuler(quaternion_);
+      // --- Вывод значений euler через Float_transform раз в секунду ---
+      static uint32_t lastPrintTick = 0;
+      if (now_tick_dt - lastPrintTick >= 1000) // 1 секунда
+      {
+        lastPrintTick = now_tick_dt;
+        // Удаляем неиспользуемые переменные
+         uint8_t sign_roll, sign_pitch, sign_yaw;
+         int int_roll, int_pitch, int_yaw;
+        uint32_t frac_roll, frac_pitch, frac_yaw;
+          Float_transform(euler.angle.roll, 3, &sign_roll, &int_roll, &frac_roll);
+          Float_transform(euler.angle.pitch, 3, &sign_pitch, &int_pitch, &frac_pitch);
+         Float_transform(euler.angle.yaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
+        // printf("[EULER] Roll: %s%d.%03lu ", sign_roll ? "-" : "", int_roll, frac_roll);
+         // printf("Pitch: %s%d.%03lu ", sign_pitch ? "-" : "", int_pitch, frac_pitch);
+         printf("Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
         // Расчет изменения yaw
         currentYaw = euler.angle.yaw; // Получаем текущее значение yaw
         float deltaYaw = normalizeAngle(currentYaw - previousYaw);
@@ -521,17 +526,17 @@ GYRO_CONFIG_0: 0x02
 
         // Обновление предыдущего значения yaw
         previousYaw = currentYaw;
-        uint8_t sign_yaw;
-        int int_yaw;
-        uint32_t frac_yaw;
+        //uint8_t sign_yaw;
+       // int int_yaw;
+        //uint32_t frac_yaw;
         Float_transform(cumulativeYaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
-        printf("Com_Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
+         printf("Com_Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
       }
-      // --- Временный вывод сырых значений акселерометра и гироскопа через Float_transform ---
-      static uint32_t lastPrintRawMicros = 0;
-      if (nowMicros - lastPrintRawMicros >= 1000000) // 1 секунда
+      // --- Временный вывод сырых значений акселерометра і гироскопа через Float_transform ---
+      static uint32_t lastPrintRawTick = 0;
+      if (now_tick_dt - lastPrintRawTick >= 1000) // 1 секунда
       {
-        lastPrintRawMicros = nowMicros;
+        lastPrintRawTick = now_tick_dt;
         // Акселерометр
         uint8_t sign_ax, sign_ay, sign_az;
         int int_ax, int_ay, int_az;
@@ -539,7 +544,7 @@ GYRO_CONFIG_0: 0x02
         Float_transform(acc_vector.x, 3, &sign_ax, &int_ax, &frac_ax);
         Float_transform(acc_vector.y, 3, &sign_ay, &int_ay, &frac_ay);
         Float_transform(acc_vector.z, 3, &sign_az, &int_az, &frac_az);
-        // printf("[RAW ACC] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_ax ? "-" : "", int_ax, frac_ax, sign_ay ? "-" : "", int_ay, frac_ay, sign_az ? "-" : "", int_az, frac_az);
+         printf("[RAW ACC] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_ax ? "-" : "", int_ax, frac_ax, sign_ay ? "-" : "", int_ay, frac_ay, sign_az ? "-" : "", int_az, frac_az);
         // Гироскоп
         uint8_t sign_gx, sign_gy, sign_gz;
         int int_gx, int_gy, int_gz;
@@ -547,7 +552,7 @@ GYRO_CONFIG_0: 0x02
         Float_transform(gyro_vector.x, 3, &sign_gx, &int_gx, &frac_gx);
         Float_transform(gyro_vector.y, 3, &sign_gy, &int_gy, &frac_gy);
         Float_transform(gyro_vector.z, 3, &sign_gz, &int_gz, &frac_gz);
-        // printf("[RAW GYRO] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_gx ? "-" : "", int_gx, frac_gx, sign_gy ? "-" : "", int_gy, frac_gy, sign_gz ? "-" : "", int_gz, frac_gz);
+         printf("[RAW GYRO] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_gx ? "-" : "", int_gx, frac_gx, sign_gy ? "-" : "", int_gy, frac_gy, sign_gz ? "-" : "", int_gz, frac_gz);
         // --- Вывод модуля вектора ускорения (acc_norm) ---
         float acc_norm = sqrtf(acc_vector.x * acc_vector.x + acc_vector.y * acc_vector.y + acc_vector.z * acc_vector.z);
         uint8_t sign_accnorm;
@@ -594,7 +599,7 @@ GYRO_CONFIG_0: 0x02
               if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
               {
                 encoderScanPoints.entry_scan_point = add_val;
-                printf("[ENC] Entry scan point set: %lld\n", add_val);
+                printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
               }
               else
               {
@@ -615,7 +620,7 @@ GYRO_CONFIG_0: 0x02
               if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
               {
                 encoderScanPoints.entry_scan_point = add_val;
-                printf("[ENC] Entry scan point set: %lld\n", add_val);
+                printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
               }
               else
               {
@@ -637,7 +642,7 @@ GYRO_CONFIG_0: 0x02
             if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
             {
               encoderScanPoints.entry_scan_point = add_val;
-              printf("[ENC] Entry scan point set: %lld\n", add_val);
+              printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
             }
             else
             {
@@ -649,38 +654,49 @@ GYRO_CONFIG_0: 0x02
         break;
       case State::GiroScope:
       {
-        // encoderScanPoints.giro_point
-        // 1. Сохраняем начальные значения
+        // --- Логування для відладки стабілізації ---
+        static int debug_counter = 0;
         if (encoderScanPoints.flag_first_run)
         {
           encoderScanPoints.flag_first_run = false;
-          encoderScanPoints.cumulativeYaw= cumulativeYaw; // Сохраняем начальное значение кумулятивного yaw
-          PID.reset(); // Сброс PID при первом запуске
+          encoderScanPoints.cumulativeYaw = cumulativeYaw; // Сохраняем начальное значение кумулятивного yaw
+          PID.reset();                                     // Сброс PID при первом запуске
+          printf("[GYRO] First run: initial_motor_pos=0x%08lX%08lX, initial_yaw=%.2f\n", (uint32_t)((encoderScanPoints.giro_point >> 32) & 0xFFFFFFFF), (uint32_t)(encoderScanPoints.giro_point & 0xFFFFFFFF), cumulativeYaw);
         }
-        
-        int64_t initial_motor_pos = encoderScanPoints.giro_point; // или другое поле с энкодера
-        float initial_yaw = encoderScanPoints.cumulativeYaw;      // например, из IMU
+        int64_t initial_motor_pos = encoderScanPoints.giro_point;
+        float initial_yaw = encoderScanPoints.cumulativeYaw;
         int64_t current_motor_pos = 0;
         MksServo_GetAdditionValue(&mksServo, &current_motor_pos, 100);
-        // 3. Вычисляем ошибку
-        float error = (cumulativeYaw - initial_yaw) + (initial_motor_pos - current_motor_pos) * (360.0f / 16384.0f); // 16384 - количество тиков на 360 градусов
-                                                                                                                     // 4. PID и управление мотором
-        float speed = PID.update(error);
+// Новый вариант: только IMU
 
-        MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 250);
-         HAL_Delay(50);
+// Формула ошибки с учётом редуктора и направления
+#define ENCODER_DIR 1                                                                                                                       // 1 для прямого направления, -1 для обратного
+#define ENCODER_K 0.1f                                                                                                                      // Коэффициент для коррекции ошибки
+        float encoder_delta = (float)(current_motor_pos - initial_motor_pos) * (360.0f / ENCODER_PULSES_PER_360_DEGREE) / MOTOR_GEAR_RATIO; // Переводим тики в градусы
+        float yaw_delta = (cumulativeYaw - initial_yaw);                                                                                    // Нормализуем угол yaw
+        float error = (yaw_delta - encoder_delta) * ENCODER_DIR;                                                                            // Вычисляем ошибку с учётом направления и редуктора
+        // Подробное логирование для анализа
+
+        // --- Логирование каждые 10 циклов с помощью Float_transform ---
+
+        static uint32_t last_speed_cmd_time = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - last_speed_cmd_time >= 1)
+        {
+          float speed = PID.update(error);
+          last_speed_cmd_time = now;
+          MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 250);
+          HAL_Delay(9);
+        }
         if (buttonsState.gyro == BUTTON_OFF)
         {
-          // Если кнопка отпущена, останавливаем мотор
+          // Якщо кнопка отпущена, останавливаем мотор
           MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
-         
           printf("[GYRO] Stopped by button release\r\n");
           HAL_Delay(200); // Неблокуюча пауза для стабільності
-           MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
-            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
         }
-        
-        
       }
       break;
 
@@ -1345,7 +1361,7 @@ void MksServo_BackgroundPacketDebug(MksServo_t *servo)
   static int zeroing_success = 0; // 1 - успішно обнулили
   while (MksServo_RxGetByte(servo, &byte))
   {
-    printf("[UART3][RAW] RX byte: %02X\n", byte);
+    // printf("[UART3][RAW] RX byte: %02X\n", byte);
     if (!collecting)
     {
       if (byte == 0xFB)
@@ -1584,26 +1600,26 @@ void MksServo_BackgroundPacketDebug(MksServo_t *servo)
       if (packet[2] == 0xF6 && idx == 5)
       {
         uint8_t status = packet[3];
-        printf("[UART3][F6] status: %u - ", status);
+      //  printf("[UART3][F6] status: %u - ", status);
         switch (status)
         {
         case 0:
-          printf("stop the motor fail\n");
+        //  printf("stop the motor fail\n");
           break;
         case 1:
-          printf("start to stop the motor...\n");
+        //  printf("start to stop the motor...\n");
           break;
         case 2:
-          printf("stop the motor success\n");
+         // printf("stop the motor success\n");
           break;
         default:
-          printf("unknown status\n");
+         // printf("unknown status\n");
           break;
         }
-        printf("[UART3][PKT] ");
+       // printf("[UART3][PKT] ");
         for (int i = 0; i < 5; ++i)
-          printf("%02X ", packet[i]);
-        printf("\n");
+       //   printf("%02X ", packet[i]);
+       // printf("\n");
         collecting = 0;
         idx = 0;
       }
