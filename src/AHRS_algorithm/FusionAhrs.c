@@ -46,7 +46,7 @@ static inline int Clamp(const int value, const int min, const int max);
 void FusionAhrsInitialise(FusionAhrs *const ahrs) {
     const FusionAhrsSettings settings = {
             .convention = FusionConventionNwu,
-            .gain = 0.5f,
+            .gain = 1.5f,
             .gyroscopeRange = 0.0f,
             .accelerationRejection = 90.0f,
             .magneticRejection = 90.0f,

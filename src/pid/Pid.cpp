@@ -20,16 +20,16 @@ PIDController::PIDController(float KP, float KI, float KD, float Ramp, float Lim
 
 // PID controller function
 float PIDController::update(float error) {
-	unsigned long long timestamp = micros();
-	float Ts = ((timestamp - timestamp_prev) & 0xffffffff) * 1e-6f;
-	// quick fix for strange cases (micros overflow)
-	/*if (Ts <= 0 || Ts > 0.5f)
-		Ts = 1e-3f;*/
+    uint32_t timestamp = HAL_GetTick();
+    float Ts = (timestamp - (uint32_t)timestamp_prev) / 1000.0f;
+    // quick fix for strange cases (overflow or zero)
+    if (Ts <= 0 || Ts > 0.5f)
+        Ts = 1e-3f;
 
-	// u(s) = (P + I/s + Ds)e(s)
-	// Discrete implementations
-	// proportional part
-	// u_p  = P *e(k)
+    // u(s) = (P + I/s + Ds)e(s)
+    // Discrete implementations
+    // proportional part
+    // u_p  = P *e(k)
 	float proportional = P * error;
 	// Tustin transform of the integral part
 	// u_ik = u_ik_1  + I*Ts/2*(ek + ek_1)

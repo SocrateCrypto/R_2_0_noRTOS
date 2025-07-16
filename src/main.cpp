@@ -367,18 +367,21 @@ int main(void)
   HAL_Delay(100);
 
   bno055_enableExternalCrystal(); // Use external crystal if available
-  HAL_Delay(100);
-  bno055_setup();
-  // === Настройка IMU: спочатку діапазони, потім смуги ===
-  bno055_setAccelConfig(BNO055_ACCEL_RANGE_2G, 0b010); // 0x01 — фильтр 31.25 Гц (пример) // Максимальна чутливість акселерометра (±2g)
   HAL_Delay(30);
-  bno055_setGyroConfig(BNO055_GYRO_RANGE_250DPS, 0b011); // 0x04 — фильтр 47 Гц (пример) // Максимальна чутливість гироскопа (±250 dps)
+  bno055_setup();
+  HAL_Delay(50);
+  bno055_setOperationMode(BNO055_OPERATION_MODE_ACCGYRO);
+  HAL_Delay(30);
+  // === Настройка IMU: спочатку діапазони, потім смуги ===
+  bno055_setAccelConfig(BNO055_ACCEL_RANGE_2G, 0b100); // 0x01 — фильтр 31.25 Гц (пример) // Максимальна чутливість акселерометра (±2g)
+  HAL_Delay(30);
+  bno055_setGyroConfig(BNO055_GYRO_RANGE_250DPS, 0b010); // 0x04 — фильтр 47 Гц (пример) // Максимальна чутливість гироскопа (±250 dps)
   HAL_Delay(30);
   // Можно раскомментировать и выставить фильтр, если нужно:
-  //bno055_setAccelBandwidth(0x01); // 31.25 Гц, 1000 Гц обновления
-  //HAL_Delay(30);
-  //bno055_setGyroBandwidth(0x04); // 47 Гц, 200 Гц обновления
-  //HAL_Delay(30);
+  // bno055_setAccelBandwidth(0x01); // 31.25 Гц, 1000 Гц обновления
+  // HAL_Delay(30);
+  // bno055_setGyroBandwidth(0x04); // 47 Гц, 200 Гц обновления
+  // HAL_Delay(30);
 
   // === Контрольные чтения регистров після установки діапазонів ===
   uint8_t acc_config = 0, gyro_config = 0;
@@ -390,10 +393,10 @@ int main(void)
   printf("GYRO_CONFIG_0 after set: 0x%02X\n", gyro_config);
 
   // === Переводимо IMU в робочий режим ===
-  bno055_setOperationMode(BNO055_OPERATION_MODE_ACCGYRO);
-  HAL_Delay(50);
- // bno055_enableGyroDataReadyInterrupt(); // Увімкнення переривання на нові дані гироскопа
- // HAL_Delay(50);
+  
+  
+  // bno055_enableGyroDataReadyInterrupt(); // Увімкнення переривання на нові дані гироскопа
+  // HAL_Delay(50);
   // === Контрольні читання регістрів ===
   // Повторно використовуемо acc_config и gyro_config, не объявляем их заново
   bno055_setPage(1);
@@ -448,7 +451,7 @@ GYRO_CONFIG_0: 0x02
       .magneticRejection = 10.0f,
       .recoveryTriggerPeriod = 5 * SAMPLE_RATE, /* 5 seconds */
   };
-  //FusionAhrsSetSettings(&ahrs, &settings);
+  // FusionAhrsSetSettings(&ahrs, &settings);
   PIDController PID(PID_KP, PID_KI, PID_KD, PID_RAMP, PID_LIMIT);
 
   while (1)
@@ -461,11 +464,21 @@ GYRO_CONFIG_0: 0x02
     // --- Считывание IMU с частотой 50 Гц (каждые 20 мс) ---
     static uint32_t last_imu_tick = 0;
     uint32_t now_tick = HAL_GetTick();
-    if (now_tick - last_imu_tick >= 20) // 20 мс = 50 Гц
+    if (now_tick - last_imu_tick >= 9) // 5 мс = 200 Гц
     {
       last_imu_tick = now_tick;
       // Acquire latest sensor data
-      // Можно убрать bno055_getIntStatus(), если polling по таймеру
+
+      static uint32_t call_count = 0;
+      static uint32_t last_time = 0;
+      call_count++;
+      uint32_t now = HAL_GetTick();
+      if (now - last_time >= 1000)
+      { // раз в 1 секунду
+        printf("Frequency: %lu Hz\n", call_count);
+        call_count = 0;
+        last_time = now;
+      }
       // --- Получение и обработка данных IMУ ---
       FusionVector accelerometer, gyroscope;
       bno055_vector_t acc_vector = bno055_readRawAccelRegisters();
@@ -476,11 +489,6 @@ GYRO_CONFIG_0: 0x02
       gyroscope.axis.x = gyro_vector.x / 128;
       gyroscope.axis.y = gyro_vector.y / 128;
       gyroscope.axis.z = gyro_vector.z / 128;
-      //  Apply calibration
-       //const FusionVector gyroscope = {gyroscope.axis.x, gyroscope.axis.y,  gyroscope.axis.z}; // replace this with actual gyroscope data in degrees/s
-      //  const FusionVector accelerometer = {accelerometer.axis.x, accelerometer.axis.y, accelerometer.axis.z}; // replace this with actual accelerometer data in g
-      //gyroscope = FusionCalibrationInertial(gyroscope, gyroscopeMisalignment, gyroscopeSensitivity, gyroscopeOffset);
-      //accelerometer = FusionCalibrationInertial(accelerometer, accelerometerMisalignment, accelerometerSensitivity, accelerometerOffset);
       // Update AHRS algorithm
       static uint32_t previousTick = 0;
       float deltaTime = 0.0f;
@@ -488,72 +496,50 @@ GYRO_CONFIG_0: 0x02
       if (previousTick != 0)
       {
         uint32_t diff = now_tick_dt - previousTick;
-        deltaTime = diff / 1000.0f;
-        static float lastDeltaTime = 0.0f;
-        if (lastDeltaTime > 0.0f && (deltaTime > 1.5f * lastDeltaTime || deltaTime < lastDeltaTime / 1.5f)) {
-            printf("[ALARM] deltaTime jump! prev: %.6f, now: %.6f\n", lastDeltaTime, deltaTime);
-        }
-        lastDeltaTime = deltaTime;
+        deltaTime = diff/1000.0f;
       }
       previousTick = now_tick_dt;
-      //FusionAhrsUpdate(&ahrs, gyroscope, accelerometer, FUSION_VECTOR_ZERO, deltaTime);
-        FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer, deltaTime);
+      FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer, deltaTime);
 
-        const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
-      //FusionQuaternion quaternion_ = FusionAhrsGetQuaternion(&ahrs);
-     // FusionEuler euler = FusionQuaternionToEuler(quaternion_);
+      const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
       // --- Вывод значений euler через Float_transform раз в секунду ---
       static uint32_t lastPrintTick = 0;
       if (now_tick_dt - lastPrintTick >= 1000) // 1 секунда
       {
         lastPrintTick = now_tick_dt;
-        // Удаляем неиспользуемые переменные
-         uint8_t sign_roll, sign_pitch, sign_yaw;
-         int int_roll, int_pitch, int_yaw;
+        uint8_t sign_roll, sign_pitch, sign_yaw;
+        int int_roll, int_pitch, int_yaw;
         uint32_t frac_roll, frac_pitch, frac_yaw;
-          Float_transform(euler.angle.roll, 3, &sign_roll, &int_roll, &frac_roll);
-          Float_transform(euler.angle.pitch, 3, &sign_pitch, &int_pitch, &frac_pitch);
-         Float_transform(euler.angle.yaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
-        // printf("[EULER] Roll: %s%d.%03lu ", sign_roll ? "-" : "", int_roll, frac_roll);
-         // printf("Pitch: %s%d.%03lu ", sign_pitch ? "-" : "", int_pitch, frac_pitch);
-         printf("Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
-        // Расчет изменения yaw
-        currentYaw = euler.angle.yaw; // Получаем текущее значение yaw
+        Float_transform(euler.angle.roll, 3, &sign_roll, &int_roll, &frac_roll);
+        Float_transform(euler.angle.pitch, 3, &sign_pitch, &int_pitch, &frac_pitch);
+        Float_transform(euler.angle.yaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
+        printf("Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
+        currentYaw = euler.angle.yaw;
         float deltaYaw = normalizeAngle(currentYaw - previousYaw);
-
-        // Обновление кумулятивного значения yaw
         cumulativeYaw += deltaYaw;
-
-        // Обновление предыдущего значения yaw
         previousYaw = currentYaw;
-        //uint8_t sign_yaw;
-       // int int_yaw;
-        //uint32_t frac_yaw;
         Float_transform(cumulativeYaw, 3, &sign_yaw, &int_yaw, &frac_yaw);
-         printf("Com_Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
+        printf("Com_Yaw: %s%d.%03lu\n", sign_yaw ? "-" : "", int_yaw, frac_yaw);
       }
       // --- Временный вывод сырых значений акселерометра і гироскопа через Float_transform ---
       static uint32_t lastPrintRawTick = 0;
       if (now_tick_dt - lastPrintRawTick >= 1000) // 1 секунда
       {
         lastPrintRawTick = now_tick_dt;
-        // Акселерометр
         uint8_t sign_ax, sign_ay, sign_az;
         int int_ax, int_ay, int_az;
         uint32_t frac_ax, frac_ay, frac_az;
         Float_transform(acc_vector.x, 3, &sign_ax, &int_ax, &frac_ax);
         Float_transform(acc_vector.y, 3, &sign_ay, &int_ay, &frac_ay);
         Float_transform(acc_vector.z, 3, &sign_az, &int_az, &frac_az);
-         printf("[RAW ACC] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_ax ? "-" : "", int_ax, frac_ax, sign_ay ? "-" : "", int_ay, frac_ay, sign_az ? "-" : "", int_az, frac_az);
-        // Гироскоп
+        printf("[RAW ACC] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_ax ? "-" : "", int_ax, frac_ax, sign_ay ? "-" : "", int_ay, frac_ay, sign_az ? "-" : "", int_az, frac_az);
         uint8_t sign_gx, sign_gy, sign_gz;
         int int_gx, int_gy, int_gz;
         uint32_t frac_gx, frac_gy, frac_gz;
         Float_transform(gyro_vector.x, 3, &sign_gx, &int_gx, &frac_gx);
         Float_transform(gyro_vector.y, 3, &sign_gy, &int_gy, &frac_gy);
         Float_transform(gyro_vector.z, 3, &sign_gz, &int_gz, &frac_gz);
-         printf("[RAW GYRO] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_gx ? "-" : "", int_gx, frac_gx, sign_gy ? "-" : "", int_gy, frac_gy, sign_gz ? "-" : "", int_gz, frac_gz);
-        // --- Вывод модуля вектора ускорения (acc_norm) ---
+        printf("[RAW GYRO] X: %s%d.%03lu Y: %s%d.%03lu Z: %s%d.%03lu ", sign_gx ? "-" : "", int_gx, frac_gx, sign_gy ? "-" : "", int_gy, frac_gy, sign_gz ? "-" : "", int_gz, frac_gz);
         float acc_norm = sqrtf(acc_vector.x * acc_vector.x + acc_vector.y * acc_vector.y + acc_vector.z * acc_vector.z);
         uint8_t sign_accnorm;
         int int_accnorm;
@@ -562,83 +548,55 @@ GYRO_CONFIG_0: 0x02
         // printf("|acc|: %s%d.%03lu\n", sign_accnorm ? "-" : "", int_accnorm, frac_accnorm);
       }
 
-      /* USER CODE BEGIN 3 */
-      static bool flag_first_run = false; // Прапорець для першого запуску педалі
+      // --- Логика индикации LED2 по изменению cumulativeYaw ---
+      static float yaw_ref = 0.0f;
+      static uint8_t led2_on = 0;
+      static uint32_t led2_on_time = 0;
+      if (!led2_on && fabsf(cumulativeYaw - yaw_ref) >= 0.3f) {
+        HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
+        led2_on = 1;
+        led2_on_time = HAL_GetTick();
+        yaw_ref = cumulativeYaw;
+      }
+      if (led2_on && (HAL_GetTick() - led2_on_time >= 1000)) {
+        HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+        led2_on = 0;
+      }
+    }
+    /* USER CODE BEGIN 3 */
+    static bool flag_first_run = false; // Прапорець для першого запуску педалі
 
-      State current_state = stateMachine.getState();
+    State current_state = stateMachine.getState();
 
-      StateMachine_loop();
+    StateMachine_loop();
 
-      // Умовний вибір дій за поточним станом
-      switch (current_state)
+    // Умовний вибір дій за поточним станом
+    switch (current_state)
+    {
+    case State::Initial:
+      // TODO: дії для Initial
+      break;
+    case State::Manual:
+      // Manual режим з покращеним антидребезгом
       {
-      case State::Initial:
-        // TODO: дії для Initial
-        break;
-      case State::Manual:
-        // Manual режим з покращеним антидребезгом
+        static uint32_t last_pot_tick = 0;
+        static uint8_t cached_pot_percent = 0;
+
+        uint32_t now = HAL_GetTick();
+
+        // Оновлюємо кешоване значення потенціометра кожні 100 мс
+        if (now - last_pot_tick >= 100)
         {
-          static uint32_t last_pot_tick = 0;
-          static uint8_t cached_pot_percent = 0;
+          last_pot_tick = now;
+          cached_pot_percent = getPotentiometerValuePercentage();
+        }
 
-          uint32_t now = HAL_GetTick();
-
-          // Оновлюємо кешоване значення потенціометра кожні 100 мс
-          if (now - last_pot_tick >= 100)
+        // Використовуємо покращений антидребезг для всіх подій (миттєва реакція + захист від дребезгу)
+        if (buttonsState.turn_left == BUTTON_ON) // Якщо ліва педаль натиснута
+        {
+          if (!flag_first_run)
           {
-            last_pot_tick = now;
-            cached_pot_percent = getPotentiometerValuePercentage();
-          }
-
-          // Використовуємо покращений антидребезг для всіх подій (миттєва реакція + захист від дребезгу)
-          if (buttonsState.turn_left == BUTTON_ON) // Якщо ліва педаль натиснута
-          {
-            if (!flag_first_run)
-            {
-              int64_t add_val = 0;
-              if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-              {
-                encoderScanPoints.entry_scan_point = add_val;
-                printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
-              }
-              else
-              {
-                printf("[ENC] Failed to read entry scan point!\n");
-              }
-            }
-
-            flag_first_run = true;
-            MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
-            printf("[MKS] Servo running left\r\n");
-          }
-          else if (buttonsState.turn_right == BUTTON_ON) // Якщо права педаль натиснута
-          {
-
-            if (!flag_first_run)
-            {
-              int64_t add_val = 0;
-              if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-              {
-                encoderScanPoints.entry_scan_point = add_val;
-                printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
-              }
-              else
-              {
-                printf("[ENC] Failed to read entry scan point!\n");
-              }
-            }
-            flag_first_run = true;
-            MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
-            printf("[MKS] Servo running right\r\n");
-          }
-          else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
-          {
-            // Обидві педалі відпущені - зупиняємо двигун
-            flag_first_run = false;
-            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
-            HAL_Delay(100);
             int64_t add_val = 0;
-            // невелика затримка для стабільності
             if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
             {
               encoderScanPoints.entry_scan_point = add_val;
@@ -648,256 +606,386 @@ GYRO_CONFIG_0: 0x02
             {
               printf("[ENC] Failed to read entry scan point!\n");
             }
-            printf("[MKS] Servo stopped (antibouce)\r\n");
           }
+
+          flag_first_run = true;
+          MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
+          printf("[MKS] Servo running left\r\n");
         }
-        break;
-      case State::GiroScope:
-      {
-        // --- Логування для відладки стабілізації ---
-        static int debug_counter = 0;
+        else if (buttonsState.turn_right == BUTTON_ON) // Якщо права педаль натиснута
+        {
+
+          if (!flag_first_run)
+          {
+            int64_t add_val = 0;
+            if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
+            {
+              encoderScanPoints.entry_scan_point = add_val;
+              printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
+            }
+            else
+            {
+              printf("[ENC] Failed to read entry scan point!\n");
+            }
+          }
+          flag_first_run = true;
+          MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
+          printf("[MKS] Servo running right\r\n");
+        }
+        else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
+        {
+          // Обидві педалі відпущені - зупиняємо двигун
+          flag_first_run = false;
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
+          HAL_Delay(100);
+          int64_t add_val = 0;
+          // невелика затримка для стабільності
+          if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
+          {
+            encoderScanPoints.entry_scan_point = add_val;
+            printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
+          }
+          else
+          {
+            printf("[ENC] Failed to read entry scan point!\n");
+          }
+          printf("[MKS] Servo stopped (antibouce)\r\n");
+        }
+      }
+      break;
+    case State::GiroScope:
+    {
+        
+      
         if (encoderScanPoints.flag_first_run)
         {
-          encoderScanPoints.flag_first_run = false;
-          encoderScanPoints.cumulativeYaw = cumulativeYaw; // Сохраняем начальное значение кумулятивного yaw
-          PID.reset();                                     // Сброс PID при первом запуске
-          printf("[GYRO] First run: initial_motor_pos=0x%08lX%08lX, initial_yaw=%.2f\n", (uint32_t)((encoderScanPoints.giro_point >> 32) & 0xFFFFFFFF), (uint32_t)(encoderScanPoints.giro_point & 0xFFFFFFFF), cumulativeYaw);
+            encoderScanPoints.flag_first_run = false;
+            encoderScanPoints.cumulativeYaw = cumulativeYaw; // Сохраняем начальное значение кумулятивного yaw
+            PID.reset();                                     // Сброс PID при первом запуске
+            printf("[GYRO] First run: initial_motor_pos=0x%08lX%08lX, initial_yaw=%.2f\n",
+                (uint32_t)((encoderScanPoints.giro_point >> 32) & 0xFFFFFFFF),
+                (uint32_t)(encoderScanPoints.giro_point & 0xFFFFFFFF), cumulativeYaw);
         }
         int64_t initial_motor_pos = encoderScanPoints.giro_point;
         float initial_yaw = encoderScanPoints.cumulativeYaw;
         int64_t current_motor_pos = 0;
-        MksServo_GetAdditionValue(&mksServo, &current_motor_pos, 100);
-// Новый вариант: только IMU
-
-// Формула ошибки с учётом редуктора и направления
-#define ENCODER_DIR 1                                                                                                                       // 1 для прямого направления, -1 для обратного
-#define ENCODER_K 0.1f                                                                                                                      // Коэффициент для коррекции ошибки
-        float encoder_delta = (float)(current_motor_pos - initial_motor_pos) * (360.0f / ENCODER_PULSES_PER_360_DEGREE) / MOTOR_GEAR_RATIO; // Переводим тики в градусы
-        float yaw_delta = (cumulativeYaw - initial_yaw);                                                                                    // Нормализуем угол yaw
-        float error = (yaw_delta - encoder_delta) * ENCODER_DIR;                                                                            // Вычисляем ошибку с учётом направления и редуктора
-        // Подробное логирование для анализа
-
-        // --- Логирование каждые 10 циклов с помощью Float_transform ---
-
-        static uint32_t last_speed_cmd_time = 0;
-        uint32_t now = HAL_GetTick();
-        if (now - last_speed_cmd_time >= 1)
+        static bool flag_for_blocking = false; // Прапорець для блокування логіки утриманняазимуту під час управління  кнопками
+        
+        
+        
+        
+        if (!flag_for_blocking)
         {
-          float speed = PID.update(error);
-          last_speed_cmd_time = now;
-          MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 250);
-          HAL_Delay(9);
-        }
-        if (buttonsState.gyro == BUTTON_OFF)
-        {
-          // Якщо кнопка отпущена, останавливаем мотор
-          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
-          printf("[GYRO] Stopped by button release\r\n");
-          HAL_Delay(200); // Неблокуюча пауза для стабільності
-          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
-          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
-        }
-      }
-      break;
-
-      case State::Scan:
-      {
-        // --- ЛОГІКА СКАНУВАННЯ через структуру-функтор з enum FSM ---
-        extern AngleSetting mode_scan; // Глобальна змінна режиму
-        struct ScanSweepFSM
-        {
-          enum FSMState
-          {
-            FSM_INIT = 0,
-            FSM_MOVING,
-            FSM_PAUSE
-          };
-          FSMState state = FSM_INIT;
-          int direction = 1; // 1 = вправо, 0 = вліво
-          uint32_t stop_time = 0;
-          int32_t limit_ticks = 0;
-          uint32_t last_carry_poll = 0;
-          uint32_t last_speed_update = 0;
-          int initialized = 0;
-          int last_speed = 0; // Для ANGLE_ADJUST
-          void reset()
-          {
-            state = FSM_INIT;
-            initialized = 0;
-          }
-          void operator()(MksServo_t &mksServo, Motor &motor)
-          {
-            uint32_t now = HAL_GetTick();
-            switch (state)
+            while (!MksServo_GetAdditionValue(&mksServo, &current_motor_pos, 100))
             {
-            case FSM_INIT:
-            {
-              direction = 1;
-              stop_time = 0;
-              // --- Вибір кута осциляції ---
-              int angle = 0;
-              if (mode_scan == ANGLE_SCAN)
-              {
-                angle = motor.oscillation_angle;
-              }
-              else
-              {
-                int pot = getPotentiometerValuePercentage();
-                angle = (pot * 360) / 100;
-                if (angle < 1)
-                  angle = 1; // Мінімальний кут
-              }
-              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
-              int64_t addition_init = 0;
-              if (MksServo_GetAdditionValue(&mksServo, &addition_init, 500))
-              {
-                printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
-                // Определяем ближайшую границу и направление
-                if (addition_init >= limit_ticks)
-                {
-                  direction = 0; // едем вліво
-                }
-                else if (addition_init <= -limit_ticks)
-                {
-                  direction = 1; // едем вправо
-                }
-                else
-                {
-                  // Находимся между границами — выбираем ближайшую
-                  direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
-                }
-              }
-              else
-              {
-                printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
-              }
-              printf("[SCAN][DEBUG] angle = %d\n", angle);
-              printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
-              uint8_t pot = getPotentiometerValuePercentage();
-              int speed = pot * 6 + 50;
-              last_speed = speed;
-              MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-              printf("[SCAN] Start %s, limit=%ld (encoder ticks), speed=%d\n", direction ? "right" : "left", (long)limit_ticks, speed);
-              last_speed_update = now;
-              last_carry_poll = now;
-              state = FSM_MOVING;
-              break;
+                HAL_Delay(1); // Неблокуюча пауза для стабільності
+                printf("[GYRO] error reed encoder: 0x%08lX%08lX\n",
+                    (uint32_t)((current_motor_pos >> 32) & 0xFFFFFFFF),
+                    (uint32_t)(current_motor_pos & 0xFFFFFFFF));
             }
-            case FSM_MOVING:
+
+            // Формула ошибки с учётом редуктора и направления
+            #define ENCODER_DIR 1
+            #define ENCODER_K 0.1f
+            float encoder_delta = (float)(current_motor_pos - initial_motor_pos) * (360.0f / ENCODER_PULSES_PER_360_DEGREE) / MOTOR_GEAR_RATIO;
+            float yaw_delta = (cumulativeYaw - initial_yaw);
+            float error = (yaw_delta - encoder_delta) * ENCODER_DIR;
+
+            float speed = 0; // PID.update(error);
+            if (fabs(error) > 0.1f)
             {
-              if (now - last_carry_poll >= 20)
-              {
-                last_carry_poll = now;
-                int64_t addition = 0;
-                int angle = 0;
-                if (mode_scan == ANGLE_ADJUST)
+                float candidate = error * 10.0f;
+                if (fabs(candidate) > fabs(speed))
                 {
-                  int pot = getPotentiometerValuePercentage();
-                  angle = (pot * 360) / 100;
-                  if (angle < 1)
-                    angle = 1;
-                  limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+                    speed = candidate;
+                    printf("candidate speed\r\n");
+                    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+                    MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 254);
                 }
-                if (MksServo_GetAdditionValue(&mksServo, &addition, 100))
+            }
+
+            static uint32_t last_speed_cmd_time = 0;
+            uint32_t now_ = HAL_GetTick();
+            if (now_ - last_speed_cmd_time >= 9)
+            {
+                last_speed_cmd_time = now_;
+                float abs_speed = fabs(speed);
+                if (abs_speed < 3.0f)
                 {
-                  printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
-                  int boundary_reached = 0;
-                  if (direction == 1 && addition >= limit_ticks)
-                    boundary_reached = 1;
-                  else if (direction == 0 && addition <= -limit_ticks)
-                    boundary_reached = 1;
-                  // В режимі ANGLE_ADJUST: якщо мотор вийшов за нову межу — одразу розворот
-                  if (boundary_reached)
+                    abs_speed = 0.0f;
+                    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+                    
+                }
+
+                MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, abs_speed, 250);
+                HAL_Delay(1);
+            }
+            if (buttonsState.gyro == BUTTON_OFF)
+            {
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+                printf("[GYRO] Stopped by button release\r\n");
+                HAL_Delay(200);
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+            }
+        }
+
+        // Manual режим з покращеним антидребезгом
+        {
+            static uint32_t last_pot_tick = 0;
+            static uint8_t cached_pot_percent = 0;
+
+            uint32_t now = HAL_GetTick();
+
+            if (now - last_pot_tick >= 100)
+            {
+                last_pot_tick = now;
+                cached_pot_percent = getPotentiometerValuePercentage();
+            }
+
+            if (buttonsState.turn_left == BUTTON_ON)
+            {
+                flag_for_blocking = true;
+                if (!flag_first_run)
+                {
+                    int64_t add_val = 0;
+                    // ... закомментированный код ...
+                }
+                flag_first_run = true;
+                MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
+                printf("[MKS] Servo running left\r\n");
+            }
+            else if (buttonsState.turn_right == BUTTON_ON)
+            {
+              flag_for_blocking = true;
+                if (!flag_first_run)
+                {
+                    int64_t add_val = 0;
+                    // ... закомментированный код ...
+                }
+                flag_first_run = true;
+                MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
+                printf("[MKS] Servo running right\r\n");
+            }
+            else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
+            {
+                flag_first_run = false;
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
+                HAL_Delay(100);
+                while (!MksServo_GetAdditionValue(&mksServo, &encoderScanPoints.giro_point, 100))
+                {
+                    printf("[ENC] Failed to read entry scan point!\n");
+                }
+                encoderScanPoints.entry_scan_point = encoderScanPoints.giro_point;
+                flag_for_blocking = false;
+                encoderScanPoints.flag_first_run = true; // Скидаємо прапорець для наступного запуску
+                printf("[ENC] Entry scan point set: 0x%08lX%08lX\n",
+                    (uint32_t)((current_motor_pos >> 32) & 0xFFFFFFFF),
+                    (uint32_t)(current_motor_pos & 0xFFFFFFFF));
+                printf("[MKS] Servo stopped (antibouce)\r\n");
+            }
+        }
+    }
+    break;
+
+  case State::Scan:
+  {
+    // --- ЛОГІКА СКАНУВАННЯ через структуру-функтор з enum FSM ---
+    extern AngleSetting mode_scan; // Глобальна змінна режиму
+    struct ScanSweepFSM
+    {
+      enum FSMState
+      {
+        FSM_INIT = 0,
+        FSM_MOVING,
+        FSM_PAUSE
+      };
+      FSMState state = FSM_INIT;
+      int direction = 1; // 1 = вправо, 0 = вліво
+      uint32_t stop_time = 0;
+      int32_t limit_ticks = 0;
+      uint32_t last_carry_poll = 0;
+      uint32_t last_speed_update = 0;
+      int initialized = 0;
+      int last_speed = 0; // Для ANGLE_ADJUST
+      void reset()
+      {
+        state = FSM_INIT;
+        initialized = 0;
+      }
+      void operator()(MksServo_t &mksServo, Motor &motor)
+      {
+        uint32_t now = HAL_GetTick();
+        switch (state)
+        {
+        case FSM_INIT:
+        {
+          direction = 1;
+          stop_time = 0;
+          // --- Вибір кута осциляції ---
+          int angle = 0;
+          if (mode_scan == ANGLE_SCAN)
+          {
+            angle = motor.oscillation_angle;
+          }
+          else
+          {
+            int pot = getPotentiometerValuePercentage();
+            angle = (pot * 360) / 100;
+            if (angle < 1)
+              angle = 1; // Мінімальний кут
+          }
+          limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+          int64_t addition_init = 0;
+          if (MksServo_GetAdditionValue(&mksServo, &addition_init, 500))
+          {
+            printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
+            // Определяем ближайшую границу и направление
+            if (addition_init >= limit_ticks)
+            {
+              direction = 0; // едем вліво
+            }
+            else if (addition_init <= -limit_ticks)
+            {
+              direction = 1; // едем вправо
+            }
+            else
+            {
+              // Находимся между границами — выбираем ближайшую
+              direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
+            }
+          }
+          else
+          {
+            printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
+          }
+          printf("[SCAN][DEBUG] angle = %d\n", angle);
+          printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
+          uint8_t pot = getPotentiometerValuePercentage();
+          int speed = pot * 6 + 50;
+          last_speed = speed;
+          MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+          printf("[SCAN] Start %s, limit=%ld (encoder ticks), speed=%d\n", direction ? "right" : "left", (long)limit_ticks, speed);
+          last_speed_update = now;
+          last_carry_poll = now;
+          state = FSM_MOVING;
+          break;
+        }
+        case FSM_MOVING:
+        {
+          if (now - last_carry_poll >= 20)
+          {
+            last_carry_poll = now;
+            int64_t addition = 0;
+            int angle = 0;
+            if (mode_scan == ANGLE_ADJUST)
+            {
+              int pot = getPotentiometerValuePercentage();
+              angle = (pot * 360) / 100;
+              if (angle < 1)
+                angle = 1;
+              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+            }
+            if (MksServo_GetAdditionValue(&mksServo, &addition, 100))
+            {
+              printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
+              int boundary_reached = 0;
+              if (direction == 1 && addition >= limit_ticks)
+                boundary_reached = 1;
+              else if (direction == 0 && addition <= -limit_ticks)
+                boundary_reached = 1;
+              // В режимі ANGLE_ADJUST: якщо мотор вийшов за нову межу — одразу розворот
+              if (boundary_reached)
+              {
+                MksServo_SpeedModeRun(&mksServo, direction, 0, 252);
+                HAL_Delay(150); // експериментальна пауза для зупинки(замінити на неблок.)
+                printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
+                stop_time = now;
+                state = FSM_PAUSE;
+              }
+              else
+              {
+                int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
+                if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100))
+                {
+                  last_speed_update = now;
+                  int speed = 0;
+                  if (mode_scan == ANGLE_SCAN)
                   {
-                    MksServo_SpeedModeRun(&mksServo, direction, 0, 252);
-                    HAL_Delay(150); // експериментальна пауза для зупинки(замінити на неблок.)
-                    printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
-                    stop_time = now;
-                    state = FSM_PAUSE;
+                    uint8_t pot = getPotentiometerValuePercentage();
+                    speed = pot * 6 + 50;
+                    last_speed = speed;
                   }
                   else
                   {
-                    int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
-                    if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100))
-                    {
-                      last_speed_update = now;
-                      int speed = 0;
-                      if (mode_scan == ANGLE_SCAN)
-                      {
-                        uint8_t pot = getPotentiometerValuePercentage();
-                        speed = pot * 6 + 50;
-                        last_speed = speed;
-                      }
-                      else
-                      {
-                        speed = last_speed; // Не оновлюємо швидкість
-                      }
-                      MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-                      printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
-                    }
+                    speed = last_speed; // Не оновлюємо швидкість
                   }
-                }
-                else
-                {
-                  printf("[SCAN][ERROR] GetAdditionValue failed\n");
+                  MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+                  printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
                 }
               }
-              break;
             }
-            case FSM_PAUSE:
+            else
             {
-              if (now - stop_time > 100)
-              {
-                direction = !direction;
-                // --- Перераховуємо кут для ANGLE_ADJUST ---
-                int angle = 0;
-                if (mode_scan == ANGLE_SCAN)
-                {
-                  angle = motor.oscillation_angle;
-                }
-                else
-                {
-                  int pot = getPotentiometerValuePercentage();
-                  angle = (pot * 360) / 100;
-                  if (angle < 1)
-                    angle = 1;
-                  limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
-                  printf("[SCAN][ADJUST] angle=%d, limit_ticks=%ld\n", angle, (long)limit_ticks);
-                }
-                int speed = (mode_scan == ANGLE_SCAN) ? (getPotentiometerValuePercentage() * 6 + 50) : last_speed;
-                MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-                printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
-                last_speed_update = now;
-                state = FSM_MOVING;
-              }
-              break;
-            }
+              printf("[SCAN][ERROR] GetAdditionValue failed\n");
             }
           }
-        };
-        static ScanSweepFSM scanFSM;
-        scanFSM(mksServo, motor);
-        break;
+          break;
+        }
+        case FSM_PAUSE:
+        {
+          if (now - stop_time > 100)
+          {
+            direction = !direction;
+            // --- Перераховуємо кут для ANGLE_ADJUST ---
+            int angle = 0;
+            if (mode_scan == ANGLE_SCAN)
+            {
+              angle = motor.oscillation_angle;
+            }
+            else
+            {
+              int pot = getPotentiometerValuePercentage();
+              angle = (pot * 360) / 100;
+              if (angle < 1)
+                angle = 1;
+              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+              printf("[SCAN][ADJUST] angle=%d, limit_ticks=%ld\n", angle, (long)limit_ticks);
+            }
+            int speed = (mode_scan == ANGLE_SCAN) ? (getPotentiometerValuePercentage() * 6 + 50) : last_speed;
+            MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+            printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
+            last_speed_update = now;
+            state = FSM_MOVING;
+          }
+          break;
+        }
+        }
       }
-      case State::BindMode:
-        // TODO: дії для BindMode
-        break;
-      case State::Calibrate:
-        // TODO: дії для Calibrate
-        break;
-      case State::CalibrateAndBind:
-        // TODO: дії для CalibrateAndBind
-        break;
-      case State::AngleAdjust:
-        break;
+    };
+    static ScanSweepFSM scanFSM;
+    scanFSM(mksServo, motor);
+    break;
+  }
+  case State::BindMode:
+    // TODO: дії для BindMode
+    break;
+  case State::Calibrate:
+    // TODO: дії для Calibrate
+    break;
+  case State::CalibrateAndBind:
+    // TODO: дії для CalibrateAndBind
+    break;
+  case State::AngleAdjust:
+    break;
 
-      default:
-        // TODO: обробка невідомого стану
-        break;
-      }
-      HAL_Delay(1); // Затримка перед виходом з циклу
-    } // <-- Закриваємо if (now_tick - last_imu_tick >= 20)
-  } // <-- Закриваємо while(1)
+  default:
+    // TODO: обробка невідомого стану
+    break;
+  }
+  HAL_Delay(1); // Затримка перед виходом з циклу
+  // <-- Закриваємо if (now_tick - last_imu_tick >= 20)
+} // <-- Закриваємо while(1)
 } // <-- Закриваємо main
 
 /**
@@ -1600,27 +1688,27 @@ void MksServo_BackgroundPacketDebug(MksServo_t *servo)
       if (packet[2] == 0xF6 && idx == 5)
       {
         uint8_t status = packet[3];
-      //  printf("[UART3][F6] status: %u - ", status);
+        //  printf("[UART3][F6] status: %u - ", status);
         switch (status)
         {
         case 0:
-        //  printf("stop the motor fail\n");
+          //  printf("stop the motor fail\n");
           break;
         case 1:
-        //  printf("start to stop the motor...\n");
+          //  printf("start to stop the motor...\n");
           break;
         case 2:
-         // printf("stop the motor success\n");
+          // printf("stop the motor success\n");
           break;
         default:
-         // printf("unknown status\n");
+          // printf("unknown status\n");
           break;
         }
-       // printf("[UART3][PKT] ");
+        // printf("[UART3][PKT] ");
         for (int i = 0; i < 5; ++i)
-       //   printf("%02X ", packet[i]);
-       // printf("\n");
-        collecting = 0;
+          //   printf("%02X ", packet[i]);
+          // printf("\n");
+          collecting = 0;
         idx = 0;
       }
     }
