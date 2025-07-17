@@ -235,7 +235,8 @@ void StateMachine_loop(void)
         }
         // 7. Если были в Initial и нажата любая педаль — Manual
         else if (stateMachine.is(State::Initial) &&
-                 (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
+                 ((buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON) ||
+                  (RadioButtonsStates.left == BUTTON_ON || RadioButtonsStates.right == BUTTON_ON)))
         {
             stateMachine.setState(State::Manual);
             MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
