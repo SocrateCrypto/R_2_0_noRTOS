@@ -64,8 +64,8 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
     static uint8_t event_sent = 0; // 0: ничего, 1: PRESS, 2: SHORT, 3: LONG
     static uint8_t released_sent = 0;
     // Используем антидребезговое чтение!
-    uint8_t left = (debounce_read(&leftDebounce) == GPIO_PIN_RESET);
-    uint8_t right = (debounce_read(&rightDebounce) == GPIO_PIN_RESET);
+    uint8_t left = (debounce_read(&leftDebounce) == GPIO_PIN_RESET || RadioButtonsStates.left == BUTTON_ON);
+    uint8_t right = (debounce_read(&rightDebounce) == GPIO_PIN_RESET || RadioButtonsStates.right == BUTTON_ON);
     uint8_t now = left && right;
     
    

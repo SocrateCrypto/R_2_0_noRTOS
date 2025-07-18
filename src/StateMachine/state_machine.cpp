@@ -6,6 +6,11 @@
 #include "Potentiometr\Potentiometer.h"
 #include "MksServo/MksDriver_allinone.h"
 #include "NRF/nrf.h" // Добавляем для функций привязки
+#include "MksServo/Motor_position_state_structure.h" // Для типа Motor
+#include <stdio.h>
+
+extern Motor motor;
+#include "EEPROM/flash_storage.h"
 #include <stdio.h>
 
 bool isSynchronized = false; // синхронно ли нажаты педали 
@@ -81,6 +86,9 @@ EncoderScanPoints encoderScanPoints = {0, 0};
 
 void StateMachine_loop(void)
 {
+    // Флаг и таймер блокировки реакции на педали после DOUBLE_BTN_RELEASE
+    static bool block_buttons = false;
+    static uint32_t block_buttons_timer = 0;
     DoubleButtonEvent updateDoubleButtons = updateDoubleButtonsState(false);
     if (updateDoubleButtons == DOUBLE_BTN_PRESS)
     {
@@ -89,6 +97,9 @@ void StateMachine_loop(void)
     else if (updateDoubleButtons == DOUBLE_BTN_RELEASE)
     {
         printf("[DBN] Double button released\n");
+        // Включаем блокировку реакции на педали на 0.3 сек
+        block_buttons = true;
+        block_buttons_timer = HAL_GetTick();
     }
     else if (updateDoubleButtons == DOUBLE_BTN_SHORT)
     {
@@ -113,7 +124,15 @@ void StateMachine_loop(void)
     static int last_speed = 0;     // Последняя скорость для ANGLE_ADJUST
     extern AngleSetting mode_scan; // Используем глобальную переменную
 
-    if (updateButtonsState())
+    // Проверяем блокировку реакции на педали
+    if (block_buttons)
+    {
+        if (HAL_GetTick() - block_buttons_timer > 300)
+        {
+            block_buttons = false;
+        }
+    }
+    if (updateButtonsState() && !block_buttons)
     {
 
   static uint32_t first_btn_press_time = 0;
@@ -332,6 +351,8 @@ void StateMachine_loop(void)
                 mode_scan = ANGLE_SCAN;
                 stateMachine.setState(State::Manual);
                 nrgf_send_angle_agiust_exit();                  // Выходим из режима ANGLE_ADJUST
+                // --- Запись значения угла в EEPROM ---
+               FlashStorage_SaveOscillationAngle(motor_angle);
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
                 printf("[FSM] -> Manual (pedal released)\n");
                 HAL_Delay(100); // Задержка для предотвращения дребезга

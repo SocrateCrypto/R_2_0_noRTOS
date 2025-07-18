@@ -14,5 +14,5 @@ typedef struct {
     uint8_t is_stopped;    // Флаг остановки
 } Motor;
 
-extern Motor motor;
+
 

@@ -28,7 +28,7 @@ extern "C" {
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
-
+#include "MksServo/Motor_position_state_structure.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -106,6 +106,7 @@ extern volatile uint8_t pb3_int_flag;
 
 #ifdef __cplusplus
 extern float cumulativeYaw; // Глобальная переменная для накопления угла поворота
+extern int16_t motor_angle; // Глобальная переменная для угла колебания мотора
 #endif
 
 #endif /* __MAIN_H */

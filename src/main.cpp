@@ -27,7 +27,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "MksServo/MksDriver_allinone.h"
-#include "MksServo/Motor_position_state_structure.h"
+
 #include "Buttons/buttons.h"
 #include "NRF/nrf.h"
 #include "EEPROM/flash_storage.h"
@@ -99,6 +99,9 @@ UART_HandleTypeDef huart3;
 // Глобальний буфер для прийому
 uint8_t uart3_rx_byte;
 MksServo_t mksServo;
+
+// Глобальная переменная для угла колебания мотора
+int16_t motor_angle = 180;
 
 // Оголошення змінних для NRF24
 #define PLD_S 32 // розмір корисного навантаження має відповідати передавачу
@@ -348,21 +351,20 @@ int main(void)
   {
     printf("[MKS] Failed to set work mode\r\n");
   }
-  Motor motor; // Ініціалізація глобальної змінної motor
+
 
   // Ініціалізуємо значення за замовчуванням
-  motor.oscillation_angle = 180; // Значення за замовчуванням на випадок помилки завантаження
+  motor_angle = 180; // Значення за замовчуванням на випадок помилки завантаження
 
-  // Завантажуємо кут розмаху з Flash пам'яті
-  int16_t motor_angle;
+  
   if (FlashStorage_LoadOscillationAngle(&motor_angle) == HAL_OK)
   {
-    motor.oscillation_angle = motor_angle;
-    printf("Motor angle loaded from Flash: %d steps\r\n", motor.oscillation_angle);
+   
+    printf("Motor angle loaded from Flash: %d steps\r\n", motor_angle);
   }
   else
   {
-    printf("Failed to load motor angle from Flash, using default: %d steps\r\n", motor.oscillation_angle);
+    printf("Failed to load motor angle from Flash, using default: %d steps\r\n", motor_angle);
   }
   HAL_Delay(100);
   HAL_GPIO_WritePin(IMU_EN_GPIO_Port, IMU_EN_Pin, GPIO_PIN_SET); // Увімкнення живлення IMU
@@ -556,9 +558,9 @@ int main(void)
           if (fabs(candidate) > fabs(speed))
           {
             speed = candidate;
-            printf("candidate speed\r\n");
+           // printf("candidate speed\r\n");
             HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-            MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 254);
+            MksServo_SpeedModeRun(&mksServo, speed > 0 ? 1 : 0, fabs(speed), 252);
           }
         }
 
@@ -647,181 +649,121 @@ int main(void)
 
     case State::Scan:
     {
-      // --- ЛОГІКА СКАНУВАННЯ через структуру-функтор з enum FSM ---
-      extern AngleSetting mode_scan; // Глобальна змінна режиму
-      struct ScanSweepFSM
-      {
-        enum FSMState
+      // --- Рабочая логика FSM для Scan ---
+      static enum { FSM_INIT = 0, FSM_MOVING, FSM_PAUSE } fsm_state = FSM_INIT;
+      static int direction = 1; // 1 = вправо, 0 = вліво
+      static uint32_t stop_time = 0;
+      static int32_t limit_ticks = 0;
+      static uint32_t last_carry_poll = 0;
+      static uint32_t last_speed_update = 0;
+      static int last_speed = 0;
+      static int initialized = 0;
+      uint32_t now = HAL_GetTick();
+      switch (fsm_state) {
+        case FSM_INIT:
         {
-          FSM_INIT = 0,
-          FSM_MOVING,
-          FSM_PAUSE
-        };
-        FSMState state = FSM_INIT;
-        int direction = 1; // 1 = вправо, 0 = вліво
-        uint32_t stop_time = 0;
-        int32_t limit_ticks = 0;
-        uint32_t last_carry_poll = 0;
-        uint32_t last_speed_update = 0;
-        int initialized = 0;
-        int last_speed = 0; // Для ANGLE_ADJUST
-        void reset()
-        {
-          state = FSM_INIT;
-          initialized = 0;
+          direction = 1;
+          stop_time = 0;
+          int angle = 0;
+          if (mode_scan == ANGLE_SCAN) {
+            angle = motor_angle;
+          } else {
+            int pot = getPotentiometerValuePercentage();
+            angle = (pot * 360) / 100;
+            if (angle < 1) angle = 1;
+          }
+          limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+          int64_t addition_init = 0;
+          if (MksServo_GetAdditionValue(&mksServo, &addition_init, 500)) {
+            printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
+            if (addition_init >= limit_ticks) direction = 0;
+            else if (addition_init <= -limit_ticks) direction = 1;
+            else direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
+          } else {
+            printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
+          }
+          printf("[SCAN][DEBUG] angle = %d\n", angle);
+          printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
+          uint8_t pot = getPotentiometerValuePercentage();
+          int speed = pot * 6 + 50;
+          last_speed = speed;
+          MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+          printf("[SCAN] Start %s, limit=%ld (encoder ticks), speed=%d\n", direction ? "right" : "left", (long)limit_ticks, speed);
+          last_speed_update = now;
+          last_carry_poll = now;
+          initialized = 1;
+          fsm_state = FSM_MOVING;
+          break;
         }
-        void operator()(MksServo_t &mksServo, Motor &motor)
+        case FSM_MOVING:
         {
-          uint32_t now = HAL_GetTick();
-          switch (state)
-          {
-          case FSM_INIT:
-          {
-            direction = 1;
-            stop_time = 0;
-            // --- Вибір кута осциляції ---
+          if (now - last_carry_poll >= 20) {
+            last_carry_poll = now;
+            int64_t addition = 0;
             int angle = 0;
-            if (mode_scan == ANGLE_SCAN)
-            {
-              angle = motor.oscillation_angle;
-            }
-            else
-            {
+            if (mode_scan == ANGLE_ADJUST) {
               int pot = getPotentiometerValuePercentage();
               angle = (pot * 360) / 100;
-              if (angle < 1)
-                angle = 1; // Мінімальний кут
+              if (angle < 1) angle = 1;
+              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
             }
-            limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
-            int64_t addition_init = 0;
-            if (MksServo_GetAdditionValue(&mksServo, &addition_init, 500))
-            {
-              printf("[SCAN][DEBUG] Initial addition = %" PRId64 "\n", addition_init);
-              // Определяем ближайшую границу и направление
-              if (addition_init >= limit_ticks)
-              {
-                direction = 0; // едем вліво
-              }
-              else if (addition_init <= -limit_ticks)
-              {
-                direction = 1; // едем вправо
-              }
-              else
-              {
-                // Находимся между границами — выбираем ближайшую
-                direction = (abs(limit_ticks - addition_init) < abs(-limit_ticks - addition_init)) ? 1 : 0;
-              }
-            }
-            else
-            {
-              printf("[SCAN][DEBUG] Initial addition: GetAdditionValue failed\n");
-            }
-            printf("[SCAN][DEBUG] angle = %d\n", angle);
-            printf("[SCAN][DEBUG] scan_limit_ticks = %ld\n", (long)limit_ticks);
-            uint8_t pot = getPotentiometerValuePercentage();
-            int speed = pot * 6 + 50;
-            last_speed = speed;
-            MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-            printf("[SCAN] Start %s, limit=%ld (encoder ticks), speed=%d\n", direction ? "right" : "left", (long)limit_ticks, speed);
-            last_speed_update = now;
-            last_carry_poll = now;
-            state = FSM_MOVING;
-            break;
-          }
-          case FSM_MOVING:
-          {
-            if (now - last_carry_poll >= 20)
-            {
-              last_carry_poll = now;
-              int64_t addition = 0;
-              int angle = 0;
-              if (mode_scan == ANGLE_ADJUST)
-              {
-                int pot = getPotentiometerValuePercentage();
-                angle = (pot * 360) / 100;
-                if (angle < 1)
-                  angle = 1;
-                limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
-              }
-              if (MksServo_GetAdditionValue(&mksServo, &addition, 100))
-              {
-                printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
-                int boundary_reached = 0;
-                if (direction == 1 && addition >= limit_ticks)
-                  boundary_reached = 1;
-                else if (direction == 0 && addition <= -limit_ticks)
-                  boundary_reached = 1;
-                // В режимі ANGLE_ADJUST: якщо мотор вийшов за нову межу — одразу розворот
-                if (boundary_reached)
-                {
-                  MksServo_SpeedModeRun(&mksServo, direction, 0, 252);
-                  HAL_Delay(150); // експериментальна пауза для зупинки(замінити на неблок.)
-                  printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
-                  stop_time = now;
-                  state = FSM_PAUSE;
-                }
-                else
-                {
-                  int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
-                  if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100))
-                  {
-                    last_speed_update = now;
-                    int speed = 0;
-                    if (mode_scan == ANGLE_SCAN)
-                    {
-                      uint8_t pot = getPotentiometerValuePercentage();
-                      speed = pot * 6 + 50;
-                      last_speed = speed;
-                    }
-                    else
-                    {
-                      speed = last_speed; // Не оновлюємо швидкість
-                    }
-                    MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-                    printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
+            if (MksServo_GetAdditionValue(&mksServo, &addition, 100)) {
+              printf("[SCAN][TRACE] addition=%" PRId64 ", limit=+-%ld, dir=%d\n", addition, (long)limit_ticks, direction);
+              int boundary_reached = 0;
+              if (direction == 1 && addition >= limit_ticks) boundary_reached = 1;
+              else if (direction == 0 && addition <= -limit_ticks) boundary_reached = 1;
+              if (boundary_reached) {
+                MksServo_SpeedModeRun(&mksServo, direction, 0, 252);
+                HAL_Delay(150);
+                printf("[SCAN] Stop at %" PRId64 " (limit=+-%ld)\n", addition, (long)limit_ticks);
+                stop_time = now;
+                fsm_state = FSM_PAUSE;
+              } else {
+                int64_t distance_to_boundary = (direction == 1) ? (limit_ticks - addition) : (addition + limit_ticks);
+                if (distance_to_boundary > (limit_ticks / 10) && (now - last_speed_update >= 100)) {
+                  last_speed_update = now;
+                  int speed = 0;
+                  if (mode_scan == ANGLE_SCAN) {
+                    uint8_t pot = getPotentiometerValuePercentage();
+                    speed = pot * 6 + 50;
+                    last_speed = speed;
+                  } else {
+                    speed = last_speed;
                   }
+                  MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+                  printf("[SCAN] Speed updated: dir=%d, speed=%d, dist_to_boundary=%" PRId64 "\n", direction, speed, distance_to_boundary);
                 }
               }
-              else
-              {
-                printf("[SCAN][ERROR] GetAdditionValue failed\n");
-              }
+            } else {
+              printf("[SCAN][ERROR] GetAdditionValue failed\n");
             }
-            break;
           }
-          case FSM_PAUSE:
-          {
-            if (now - stop_time > 100)
-            {
-              direction = !direction;
-              // --- Перераховуємо кут для ANGLE_ADJUST ---
-              int angle = 0;
-              if (mode_scan == ANGLE_SCAN)
-              {
-                angle = motor.oscillation_angle;
-              }
-              else
-              {
-                int pot = getPotentiometerValuePercentage();
-                angle = (pot * 360) / 100;
-                if (angle < 1)
-                  angle = 1;
-                limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
-                printf("[SCAN][ADJUST] angle=%d, limit_ticks=%ld\n", angle, (long)limit_ticks);
-              }
-              int speed = (mode_scan == ANGLE_SCAN) ? (getPotentiometerValuePercentage() * 6 + 50) : last_speed;
-              MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
-              printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
-              last_speed_update = now;
-              state = FSM_MOVING;
-            }
-            break;
-          }
-          }
+          break;
         }
-      };
-      static ScanSweepFSM scanFSM;
-      scanFSM(mksServo, motor);
+        case FSM_PAUSE:
+        {
+          if (now - stop_time > 100) {
+            direction = !direction;
+            int angle = 0;
+            if (mode_scan == ANGLE_SCAN) {
+              angle = motor_angle;
+            } else {
+              int pot = getPotentiometerValuePercentage();
+              angle = (pot * 360) / 100;
+              if (angle < 1) angle = 1;
+              limit_ticks = angle_deg_to_encoder_ticks((float)angle) / 2;
+              printf("[SCAN][ADJUST] angle=%d, limit_ticks=%ld\n", angle, (long)limit_ticks);
+              motor_angle = angle; // Сохраняем новый угол для дальнейшего использования
+            }
+            int speed = (mode_scan == ANGLE_SCAN) ? (getPotentiometerValuePercentage() * 6 + 50) : last_speed;
+            MksServo_SpeedModeRun(&mksServo, direction, speed, 250);
+            printf("[SCAN] Reverse, dir=%d, speed=%d\n", direction, speed);
+            last_speed_update = now;
+            fsm_state = FSM_MOVING;
+          }
+          break;
+        }
+      }
       break;
     }
     case State::BindMode:
