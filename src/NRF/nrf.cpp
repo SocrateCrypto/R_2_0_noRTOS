@@ -15,7 +15,7 @@
 RadioButtons RadioButtonsStates = {0}; // Инициализируем все биты нулями
 
 #define PLD_S 32  // Define PLD_S with an appropriate value
-#define RADIO_TIMEOUT 1500 // Увеличенный таймаут 1.5 секунды для надежности
+#define RADIO_TIMEOUT 500 // Увеличенный таймаут 1.5 секунды для надежности
 
 // Константы для привязки
 #define BIND_CHANNEL 76                                    // Канал для привязки (тот же что и рабочий)
@@ -393,6 +393,7 @@ void nrf_loop(uint8_t irq)
               if(current_time - last_bind_packet_time > BIND_PACKET_TIMEOUT) {
                   printf("Bind packet timeout expired. Resetting response counter.\r\n");
                   bind_response_count = 0;  // Сбрасываем счетчик после таймаута
+                  
               }
               
               last_bind_packet_time = current_time;
@@ -413,6 +414,7 @@ void nrf_loop(uint8_t irq)
               
               // Не обрабатываем как кнопки
               processed_data++;  // Увеличиваем счетчик
+              memset(dataR, 0, sizeof(dataR));
               return;
           }
           
@@ -429,7 +431,10 @@ void nrf_loop(uint8_t irq)
                  processed_data);
                  
           processed_data++;
+          nrf24_flush_rx();  // Также очищаем RX буфер
       }
+      // Очищаем буфер после обработки любого пакета
+     // memset(dataR, 0, sizeof(dataR));
     }
     
 }
@@ -501,7 +506,7 @@ void update_radio_buttons(const char* data) {
         RadioButtonsStates.both = B;
         
         // Если обе кнопки нажаты, устанавливаем left_end_right
-        RadioButtonsStates.left_end_right = LR ? 1 : 0;
+        RadioButtonsStates.left_end_right = LR ;
     }
 }
 

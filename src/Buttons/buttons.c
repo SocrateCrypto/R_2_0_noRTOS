@@ -1,3 +1,5 @@
+#include <stdint.h>
+#include "NRF/nrf.h" // Для структуры RadioButtonsStates
 #include "buttons.h"
 #include "stm32f1xx_hal.h"
 #include "main.h"
@@ -28,14 +30,16 @@ bool updateGyroButtonState()
 bool updateTurnRightButtonState()
 {
     ButtonState prev = buttonsState.turn_right;
-    buttonsState.turn_right = (debounce_read(&rightDebounce) == GPIO_PIN_RESET) ? BUTTON_ON : BUTTON_OFF;
+    // Кнопка считается нажатой, если нажата физически или по радио
+    buttonsState.turn_right = ((debounce_read(&rightDebounce) == GPIO_PIN_RESET) || (RadioButtonsStates.right == BUTTON_ON)) ? BUTTON_ON : BUTTON_OFF;
     return (prev != buttonsState.turn_right);
 }
 
 bool updateTurnLeftButtonState()
 {
     ButtonState prev = buttonsState.turn_left;
-    buttonsState.turn_left = (debounce_read(&leftDebounce) == GPIO_PIN_RESET) ? BUTTON_ON : BUTTON_OFF;
+    // Кнопка считается нажатой, если нажата физически или по радио
+    buttonsState.turn_left = ((debounce_read(&leftDebounce) == GPIO_PIN_RESET) || (RadioButtonsStates.left == BUTTON_ON)) ? BUTTON_ON : BUTTON_OFF;
     return (prev != buttonsState.turn_left);
 }
 

@@ -424,6 +424,18 @@ int main(void)
     {
     case State::Initial:
       // TODO: дії для Initial
+      if(RadioButtonsStates.right == BUTTON_ON  or RadioButtonsStates.left == BUTTON_ON) // Якщо ліва педаль натиснута
+      {
+        stateMachine.setState(State::Manual);
+        printf("[ENC] Transition to Manual state\r\n");
+      }
+      if(buttonsState.gyro == BUTTON_ON) // Якщо кнопка Gyro натиснута
+      {
+        stateMachine.setState(State::GiroScope);
+        HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET); // Увімкнення LAMP
+        printf("[ENC] Transition to GiroScope state\r\n");
+      }else HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Вимикаємо LAMP
+      
       break;
     case State::Manual:
       // Manual режим з покращеним антидребезгом
@@ -441,7 +453,7 @@ int main(void)
         }
 
         // Використовуємо покращений антидребезг для всіх подій (миттєва реакція + захист від дребезгу)
-        if (buttonsState.turn_left == BUTTON_ON or RadioButtonsStates.left == BUTTON_ON) // Якщо ліва педаль натиснута
+        if (buttonsState.turn_left == BUTTON_ON ) // Якщо ліва педаль натиснута
         {
           if (!flag_first_run)
           {
@@ -461,7 +473,7 @@ int main(void)
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
           //printf("[MKS] Servo running left\r\n");
         }
-        else if (buttonsState.turn_right == BUTTON_ON or RadioButtonsStates.right == BUTTON_ON) // Якщо права педаль натиснута
+        else if (buttonsState.turn_right == BUTTON_ON ) // Якщо права педаль натиснута
         {
 
           if (!flag_first_run)
@@ -504,10 +516,11 @@ int main(void)
       break;
     case State::GiroScope:
     {
-
+ static bool flag_for_blocking = false; // Прапорець для блокування логіки утриманняазимуту під час управління  кнопками
       if (encoderScanPoints.flag_first_run)
       {
         encoderScanPoints.flag_first_run = false;
+        flag_for_blocking = false; // Скидаємо прапорець блокування при першому запуску
         encoderScanPoints.cumulativeYaw = cumulativeYaw; // Сохраняем начальное значение кумулятивного yaw
         PID.reset();                                     // Сброс PID при первом запуске
         printf("[GYRO] First run: initial_motor_pos=0x%08lX%08lX, initial_yaw=%.2f\n",
@@ -517,7 +530,7 @@ int main(void)
       int64_t initial_motor_pos = encoderScanPoints.giro_point;
       float initial_yaw = encoderScanPoints.cumulativeYaw;
       int64_t current_motor_pos = 0;
-      static bool flag_for_blocking = false; // Прапорець для блокування логіки утриманняазимуту під час управління  кнопками
+     
 
       if (!flag_for_blocking)
       {
@@ -587,7 +600,7 @@ int main(void)
           cached_pot_percent = getPotentiometerValuePercentage();
         }
 
-        if (buttonsState.turn_left == BUTTON_ON)
+        if (buttonsState.turn_left == BUTTON_ON ) 
         {
           flag_for_blocking = true;
           if (!flag_first_run)
@@ -597,9 +610,9 @@ int main(void)
           }
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
-          printf("[MKS] Servo running left\r\n");
+          //printf("[MKS] Servo running left\r\n");
         }
-        else if (buttonsState.turn_right == BUTTON_ON)
+        else if (buttonsState.turn_right == BUTTON_ON )
         {
           flag_for_blocking = true;
           if (!flag_first_run)
@@ -609,7 +622,7 @@ int main(void)
           }
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
-          printf("[MKS] Servo running right\r\n");
+         // printf("[MKS] Servo running right\r\n");
         }
         else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
         {
