@@ -11,6 +11,7 @@ ButtonsState buttonsState = {BUTTON_OFF, BUTTON_OFF, BUTTON_OFF, BUTTON_OFF, BUT
 // --- Добавьте эти строки ---
 static DebounceButton leftDebounce;
 static DebounceButton rightDebounce;
+static DebounceButton bindDebounce;
 
 // ---------------------------
 
@@ -18,6 +19,7 @@ void buttonsDebounceInit(void)
 {
     debounce_init(&leftDebounce, GPIOB, LEFT_Pin, 15);   // 15 мс — время игнорирования дребезга
     debounce_init(&rightDebounce, GPIOB, RIGHT_Pin, 15); // можно подобрать оптимальное значение
+    debounce_init(&bindDebounce, GPIOA, BIND_Pin, 15);
 }
 
 bool updateGyroButtonState()
@@ -92,7 +94,7 @@ DoubleButtonEvent updateDoubleButtonsState(bool autoReset)
                 event_sent = 3;
                 printf("[DBTN] LONG: held %lu ms\n", held);
             }
-            else if (held >= 500 && event_sent < 2)
+            else if (held >= 300 && event_sent < 2)
             {
                 result = DOUBLE_BTN_SHORT;
                 event_sent = 2;

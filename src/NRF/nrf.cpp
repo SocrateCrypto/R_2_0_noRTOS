@@ -15,7 +15,7 @@
 RadioButtons RadioButtonsStates = {0}; // Инициализируем все биты нулями
 
 #define PLD_S 32  // Define PLD_S with an appropriate value
-#define RADIO_TIMEOUT 500 // Увеличенный таймаут 1.5 секунды для надежности
+#define RADIO_TIMEOUT 300 //  таймаут  секунды для надежности
 
 // Константы для привязки
 #define BIND_CHANNEL 76                                    // Канал для привязки (тот же что и рабочий)

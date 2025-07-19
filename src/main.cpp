@@ -340,9 +340,9 @@ int main(void)
 
   MksServo_Init(&mksServo, &huart3, RS485_DERE_GPIO_Port, RS485_DERE_Pin, 1);
   MksServo_SetMicrostep(&mksServo, 0x05); // Встановлення мікрокроків у 16
-  HAL_Delay(2000);                        // Пауза після ініціалізації
+  HAL_Delay(1000);                        // Пауза після ініціалізації
   // Встановлюємо режим роботи сервоприводу за замовчуванням
-  uint8_t servo_mode = 5; // Режим SR _CLOSE
+  uint8_t servo_mode =0; // Режим SR_OPEN
   if (MksServo_SetWorkMode(&mksServo, servo_mode))
   {
     printf("[MKS] Work mode set to default: %d\r\n", servo_mode);
@@ -351,8 +351,10 @@ int main(void)
   {
     printf("[MKS] Failed to set work mode\r\n");
   }
-
-
+//MksServo_SetHoldingCurrent(&mksServo, 0x00); // Установить 10% удерживающего тока
+uint8_t status = MksServo_SetWorkingCurrent(&mksServo, 1000, 500);
+if (status == 1) printf("Current set OK\n");
+else printf("Current set FAIL\n");
   // Ініціалізуємо значення за замовчуванням
   motor_angle = 180; // Значення за замовчуванням на випадок помилки завантаження
 
@@ -426,7 +428,7 @@ int main(void)
     {
     case State::Initial:
       // TODO: дії для Initial
-      if(RadioButtonsStates.right == BUTTON_ON  or RadioButtonsStates.left == BUTTON_ON) // Якщо ліва педаль натиснута
+      if(RadioButtonsStates.right == BUTTON_ON ) // Якщо ліва педаль натиснута
       {
         stateMachine.setState(State::Manual);
         printf("[ENC] Transition to Manual state\r\n");
@@ -442,6 +444,21 @@ int main(void)
     case State::Manual:
       // Manual режим з покращеним антидребезгом
       {
+        if (RadioButtonsStates.both== BUTTON_ON) // 
+        {
+          
+          
+           stateMachine.setState(State::Scan);
+           nrf_send_long_beep();
+            printf("[ENC] Transition to Scan state\r\n");
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // зупинка сервоприводу
+            HAL_Delay(50);                                 // Задержка для стабилизации после остановки
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // зупинка сервоприводу
+          
+          break;
+        }
+        
+        
         static uint32_t last_pot_tick = 0;
         static uint8_t cached_pot_percent = 0;
 
@@ -455,52 +472,35 @@ int main(void)
         }
 
         // Використовуємо покращений антидребезг для всіх подій (миттєва реакція + захист від дребезгу)
-        if (buttonsState.turn_left == BUTTON_ON ) // Якщо ліва педаль натиснута
+        if (buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_OFF) // Якщо ліва педаль натиснута
         {
           if (!flag_first_run)
           {
-            int64_t add_val = 0;
-            if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-            {
-              encoderScanPoints.entry_scan_point = add_val;
-              printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
-            }
-            else
-            {
-              printf("[ENC] Failed to read entry scan point!\n");
-            }
-          }
-
-          flag_first_run = true;
+             flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
-          //printf("[MKS] Servo running left\r\n");
+          printf("[MKS] Servo running left\r\n");
+          }
+
+         
         }
-        else if (buttonsState.turn_right == BUTTON_ON ) // Якщо права педаль натиснута
+        else if (buttonsState.turn_right == BUTTON_ON && buttonsState.turn_left == BUTTON_OFF) // Якщо права педаль натиснута
         {
 
           if (!flag_first_run)
           {
-            int64_t add_val = 0;
-            if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
-            {
-              encoderScanPoints.entry_scan_point = add_val;
-              printf("[ENC] Entry scan point set: 0x%08lX%08lX\n", (uint32_t)((add_val >> 32) & 0xFFFFFFFF), (uint32_t)(add_val & 0xFFFFFFFF));
-            }
-            else
-            {
-              printf("[ENC] Failed to read entry scan point!\n");
-            }
-          }
-          flag_first_run = true;
+            flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x00, (cached_pot_percent * 6 + 50), 250);
-          //printf("[MKS] Servo running right\r\n");
+          printf("[MKS] Servo running right\r\n");
+          }
+         
         }
         else if ((buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) && flag_first_run)
         {
           // Обидві педалі відпущені - зупиняємо двигун
           flag_first_run = false;
           MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
-          HAL_Delay(100);
+          HAL_Delay(50);
+          MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // зупинка сервоприводу
           int64_t add_val = 0;
           // невелика затримка для стабільності
           if (MksServo_GetAdditionValue(&mksServo, &add_val, 100))
@@ -518,6 +518,20 @@ int main(void)
       break;
     case State::GiroScope:
     {
+
+       if (RadioButtonsStates.both== BUTTON_ON) // 
+        {
+          
+          
+            stateMachine.setState(State::Scan);
+            nrf_send_long_beep();
+            printf("[ENC] Transition to Scan state\r\n");
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // зупинка сервоприводу
+            HAL_Delay(50);                                 // Задержка для стабилизации после остановки
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // зупинка сервоприводу
+          
+          break;
+        }
  static bool flag_for_blocking = false; // Прапорець для блокування логіки утриманняазимуту під час управління  кнопками
       if (encoderScanPoints.flag_first_run)
       {
@@ -602,24 +616,24 @@ int main(void)
           cached_pot_percent = getPotentiometerValuePercentage();
         }
 
-        if (buttonsState.turn_left == BUTTON_ON ) 
+        if (buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_OFF) 
         {
           flag_for_blocking = true;
           if (!flag_first_run)
           {
-            int64_t add_val = 0;
+            //int64_t add_val = 0;
             // ... закомментированный код ...
           }
           flag_first_run = true;
           MksServo_SpeedModeRun(&mksServo, 0x01, (cached_pot_percent * 6 + 50), 250);
           //printf("[MKS] Servo running left\r\n");
         }
-        else if (buttonsState.turn_right == BUTTON_ON )
+        else if (buttonsState.turn_right == BUTTON_ON && buttonsState.turn_left == BUTTON_OFF)
         {
           flag_for_blocking = true;
           if (!flag_first_run)
           {
-            int64_t add_val = 0;
+            //int64_t add_val = 0;
             // ... закомментированный код ...
           }
           flag_first_run = true;

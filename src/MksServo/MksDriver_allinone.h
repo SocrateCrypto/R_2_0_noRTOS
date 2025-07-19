@@ -67,6 +67,10 @@ uint8_t MksServo_Calibrate(MksServo_t *servo, uint32_t timeout_ms);
 uint8_t MksServo_MoveSteps(MksServo_t *servo, uint8_t dir, uint32_t steps, uint8_t acc);
 uint8_t MksServo_MoveDegrees(MksServo_t *servo, float degrees, uint8_t acc);
 void    MksServo_SendRaw(MksServo_t *servo, const uint8_t *data, uint16_t len);
+// Установка рабочего тока SERVO42D/57D (Ma option)
+uint8_t MksServo_SetWorkingCurrent(MksServo_t *servo, uint16_t current_ma, uint32_t timeout_ms);
+// Установка процента удерживающего тока SERVO42D/57D
+void MksServo_SetHoldingCurrent(MksServo_t *servo, uint8_t percent_code);
 // --- DEBUG ---
 uint8_t MksServo_ReadResponse(MksServo_t *servo, uint8_t *rx, uint8_t rx_len, uint32_t timeout_ms);
 // --- POSITION ---

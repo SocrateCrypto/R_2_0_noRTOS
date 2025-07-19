@@ -5,7 +5,7 @@
 #include "../Buttons/buttons.h"
 #include "Potentiometr\Potentiometer.h"
 #include "MksServo/MksDriver_allinone.h"
-#include "NRF/nrf.h" // Добавляем для функций привязки
+#include "NRF/nrf.h"                                 // Добавляем для функций привязки
 #include "MksServo/Motor_position_state_structure.h" // Для типа Motor
 #include <stdio.h>
 
@@ -13,7 +13,7 @@ extern Motor motor;
 #include "EEPROM/flash_storage.h"
 #include <stdio.h>
 
-bool isSynchronized = false; // синхронно ли нажаты педали 
+bool isSynchronized = false; // синхронно ли нажаты педали
 AngleSetting mode_scan = ANGLE_SCAN;
 StateMachine::StateMachine() : currentState(State::Initial), homeCarry(0), homeValue(0), homePositionSet(false) {}
 
@@ -79,8 +79,6 @@ const char *stateToStr(State state)
 
 #define ENTRY_SCAN_BLOCK_MS 100 // Время блокировки повторной записи entry_scan_point (мс)
 
-
-
 // Глобальный экземпляр структуры для хранения значений энкодера
 EncoderScanPoints encoderScanPoints = {0, 0};
 
@@ -92,6 +90,13 @@ void StateMachine_loop(void)
     DoubleButtonEvent updateDoubleButtons = updateDoubleButtonsState(false);
     if (updateDoubleButtons == DOUBLE_BTN_PRESS)
     {
+        while (updateDoubleButtonsState(false) == DOUBLE_BTN_PRESS)
+        {
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
+            HAL_Delay(30);
+        }
+
+        MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
         printf("[DBN] Double button pressed\n");
     }
     else if (updateDoubleButtons == DOUBLE_BTN_RELEASE)
@@ -103,6 +108,39 @@ void StateMachine_loop(void)
     }
     else if (updateDoubleButtons == DOUBLE_BTN_SHORT)
     {
+        // логика для Scan
+        if (stateMachine.is(State::Initial) ||
+            stateMachine.is(State::Manual) ||
+            stateMachine.is(State::GiroScope))
+        {
+
+            MksServo_SetWorkMode(&mksServo, 5); // Устанавливаем режим SR_CLOSE
+            stateMachine.setState(State::Scan);
+
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
+            HAL_Delay(100);                                 // Задержка для стабилизации после остановки
+            // --- Перемещение двигателя в last_scan_point перед ожиданием статуса F5 ---
+
+            // int64_t target = encoderScanPoints.entry_scan_point;
+            // printf("[FSM] Moving motor to last_scan_point: %lld\n", target);
+            // uint8_t move_ok = MksServo_AbsoluteMotionByAxis_F5(&mksServo, &target, 3000);
+            // if (!move_ok)
+            // {
+            //     printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
+            // }
+            // HAL_Delay(500);
+            // if (isSynchronized)
+            //{
+            //  MksServo_AbsoluteMotionByAxis_F5(&mksServo, &encoderScanPoints.entry_scan_point, 1000);
+            //}
+
+            HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
+            nrf_send_long_beep();
+            // Короткая пауза для надійності
+            HAL_Delay(100);                           // Задержка
+            MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
+            printf("[FSM] -> Scan (double_pedal pressed)\n");
+        }
         printf("[DBN] Double button short press\n");
     }
     else if (updateDoubleButtons == DOUBLE_BTN_LONG)
@@ -118,7 +156,7 @@ void StateMachine_loop(void)
 
         printf("[DBN] Double button long press\n");
     }
-   
+
     static bool flag_blocked_for_debounce = 0; // Флаг блокировки Scan
     static uint32_t debounce_timer = 0;
     static int last_speed = 0;     // Последняя скорость для ANGLE_ADJUST
@@ -135,47 +173,61 @@ void StateMachine_loop(void)
     if (updateButtonsState() && !block_buttons)
     {
 
-  static uint32_t first_btn_press_time = 0;
-    static uint8_t first_btn = 0; // 1 - left, 2 - right
-    static uint8_t double_btn_sync_checked = 0;
-    // Проверка асинхронности двойного нажатия
-    if (!double_btn_sync_checked) {
-        if (buttonsState.turn_left == BUTTON_ON && first_btn == 0) {
-            first_btn_press_time = HAL_GetTick();
-            first_btn = 1;
-        } else if (buttonsState.turn_right == BUTTON_ON && first_btn == 0) {
-            first_btn_press_time = HAL_GetTick();
-            first_btn = 2;
-        }
-        // Если вторая кнопка нажата
-        if (first_btn == 1 && buttonsState.turn_right == BUTTON_ON) {
-            uint32_t dt = HAL_GetTick() - first_btn_press_time;
-            if (dt < 400) {
-                printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
-                isSynchronized = true; // Устанавливаем флаг синхронизации
-            } else {
-                printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
-                isSynchronized = false; // Сброс флага синхронизации
+        static uint32_t first_btn_press_time = 0;
+        static uint8_t first_btn = 0; // 1 - left, 2 - right
+        static uint8_t double_btn_sync_checked = 0;
+        // Проверка асинхронности двойного нажатия
+        if (!double_btn_sync_checked)
+        {
+            if (buttonsState.turn_left == BUTTON_ON && first_btn == 0)
+            {
+                first_btn_press_time = HAL_GetTick();
+                first_btn = 1;
             }
-            double_btn_sync_checked = 1;
-        } else if (first_btn == 2 && buttonsState.turn_left == BUTTON_ON) {
-            uint32_t dt = HAL_GetTick() - first_btn_press_time;
-            if (dt < 400) {
-                printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
-                isSynchronized = true; // Устанавливаем флаг синхронизации
-            } else {
-                printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
-                isSynchronized = false; // Сброс флага синхронизации
+            else if (buttonsState.turn_right == BUTTON_ON && first_btn == 0)
+            {
+                first_btn_press_time = HAL_GetTick();
+                first_btn = 2;
             }
-            double_btn_sync_checked = 1;
+            // Если вторая кнопка нажата
+            if (first_btn == 1 && buttonsState.turn_right == BUTTON_ON)
+            {
+                uint32_t dt = HAL_GetTick() - first_btn_press_time;
+                if (dt < 400)
+                {
+                    printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
+                    isSynchronized = true; // Устанавливаем флаг синхронизации
+                }
+                else
+                {
+                    printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
+                    isSynchronized = false; // Сброс флага синхронизации
+                }
+                double_btn_sync_checked = 1;
+            }
+            else if (first_btn == 2 && buttonsState.turn_left == BUTTON_ON)
+            {
+                uint32_t dt = HAL_GetTick() - first_btn_press_time;
+                if (dt < 400)
+                {
+                    printf("[DBN] Double button press: SYNC (dt=%lu ms)\n", dt);
+                    isSynchronized = true; // Устанавливаем флаг синхронизации
+                }
+                else
+                {
+                    printf("[DBN] Double button press: ASYNC (dt=%lu ms)\n", dt);
+                    isSynchronized = false; // Сброс флага синхронизации
+                }
+                double_btn_sync_checked = 1;
+            }
         }
-    }
-    // Сброс при отпускании обеих кнопок
-    if (buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF) {
-        first_btn = 0;
-        first_btn_press_time = 0;
-        double_btn_sync_checked = 0;
-    }
+        // Сброс при отпускании обеих кнопок
+        if (buttonsState.turn_left == BUTTON_OFF && buttonsState.turn_right == BUTTON_OFF)
+        {
+            first_btn = 0;
+            first_btn_press_time = 0;
+            double_btn_sync_checked = 0;
+        }
 
         // 1. Приоритет: CalibrateAndBind
         // Вывод значения потенциометра в процентах
@@ -185,6 +237,7 @@ void StateMachine_loop(void)
             if (!stateMachine.is(State::CalibrateAndBind))
             {
                 stateMachine.setState(State::CalibrateAndBind);
+
                 printf("[FSM] -> CalibrateAndBind\n");
                 nrf_enter_binding_mode();                                    // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
@@ -196,7 +249,13 @@ void StateMachine_loop(void)
             if (!stateMachine.is(State::BindMode))
             {
                 stateMachine.setState(State::BindMode);
-                printf("[FSM] -> BindMode\n");
+                 printf("[FSM] -> BindMode\n");
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+                HAL_Delay(50);                                 // Задержка для стабилизации после останов
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
+                 HAL_Delay(150); 
+                MksServo_SetWorkMode(&mksServo, 0); // Устанавливаем режим SR_CLOSE
+               
                 nrf_enter_binding_mode();                                    // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
@@ -206,6 +265,7 @@ void StateMachine_loop(void)
         {
             if (!stateMachine.is(State::Calibrate))
             {
+                MksServo_Calibrate(&mksServo, 100);
                 stateMachine.setState(State::Calibrate);
                 printf("[FSM] -> Calibrate\n");
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
@@ -216,25 +276,26 @@ void StateMachine_loop(void)
             (stateMachine.is(State::Manual) || stateMachine.is(State::Initial)) &&
             buttonsState.gyro == BUTTON_ON)
         {
+            MksServo_SetWorkMode(&mksServo, 5);
             stateMachine.setState(State::GiroScope);
             printf("[FSM] -> GiroScope\n");
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET);
             int64_t add_val = 0;
             MksServo_GetAdditionValue(&mksServo, &add_val, 100);
             encoderScanPoints.giro_point = add_val;
-           // encoderScanPoints.cumulativeYaw =cumulativeYaw; // Сохраняем накопленный угол поворота
+            // encoderScanPoints.cumulativeYaw =cumulativeYaw; // Сохраняем накопленный угол поворота
             encoderScanPoints.flag_first_run = true; // Устанавливаем флаг первого запуска
             // PID.reset();
         }
         // 5. Если были в GiroScope и gyro отпущена — вернуться в Manual
         else if (stateMachine.is(State::GiroScope) && buttonsState.gyro == BUTTON_OFF)
         {
-              MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); 
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);
             stateMachine.setState(State::Manual);
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
-                       // stop servo
-            HAL_Delay(100); // Задержка для стабилизации после остановки
-             MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);              // stop servo
+                                                                         // stop servo
+            HAL_Delay(100);                                              // Задержка для стабилизации после остановки
+            MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0);                // stop servo
             printf("[FSM] -> Manual (from GiroScope)\n");
         }
         // 6. Если были в Calibrate/Bind/CalibrateAndBind и gyro нажата — возврат в GiroScope
@@ -247,15 +308,21 @@ void StateMachine_loop(void)
             {
                 nrf_exit_binding_mode(); // Выходим из режима привязки NRF
             }
-
+            MksServo_SetWorkMode(&mksServo, 5); // Устанавливаем режим SR_CLOSE
             stateMachine.setState(State::GiroScope);
             printf("[FSM] -> GiroScope (after Calibrate/Bind)\n");
             HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_SET); // Выключить лампочку
+            int64_t add_val = 0;
+            MksServo_GetAdditionValue(&mksServo, &add_val, 100);
+            encoderScanPoints.giro_point = add_val;
+            // encoderScanPoints.cumulativeYaw =cumulativeYaw; // Сохраняем накопленный угол поворота
+            encoderScanPoints.flag_first_run = true; // Устанавливаем флаг первого запуска
         }
         // 7. Если были в Initial и нажата любая педаль — Manual
         else if (stateMachine.is(State::Initial) &&
                  (buttonsState.turn_left == BUTTON_ON || buttonsState.turn_right == BUTTON_ON))
         {
+            MksServo_SetWorkMode(&mksServo, 5); // Устанавливаем режим SR_CLOSE
             stateMachine.setState(State::Manual);
             MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
             printf("[FSM] -> Manual (from Initial)\n");
@@ -278,6 +345,7 @@ void StateMachine_loop(void)
             }
 
             stateMachine.setState(State::Initial);
+            MksServo_SetWorkMode(&mksServo, 0);
             printf("[FSM] -> Initial (from Bind/Calibrate)\n");
         }
         printf("Current state: %s\n", stateToStr(stateMachine.getState()));
@@ -290,37 +358,13 @@ void StateMachine_loop(void)
             if ((buttonsState.turn_left == BUTTON_ON && buttonsState.turn_right == BUTTON_ON) &&
                 !flag_blocked_for_debounce)
             {
+                MksServo_SetWorkMode(&mksServo, 5); // Устанавливаем режим SR_CLOSE
 
-                stateMachine.setState(State::Scan);
-              
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
-                HAL_Delay(100); // Задержка для стабилизации после остановки
+                HAL_Delay(100);                                 // Задержка для стабилизации после остановки
                 // --- Перемещение двигателя в last_scan_point перед ожиданием статуса F5 ---
-                
-               
-                
-                //int64_t target = encoderScanPoints.entry_scan_point;
-                //printf("[FSM] Moving motor to last_scan_point: %lld\n", target);
-                //uint8_t move_ok = MksServo_AbsoluteMotionByAxis_F5(&mksServo, &target, 3000);
-                //if (!move_ok)
-               // {
-               //     printf("[FSM][ERROR] Failed to send AbsoluteMotionByAxis_F5 command!\n");
-               // }
-              // HAL_Delay(500);
-              if (isSynchronized)
-              {
-                MksServo_AbsoluteMotionByAxis_F5(&mksServo, &encoderScanPoints.entry_scan_point, 1000);
-              }
-              
-                
                 flag_blocked_for_debounce = 1;
                 debounce_timer = HAL_GetTick();
-                HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET); // Выключить лампочку
-                nrf_send_long_beep();
-                // Короткая пауза для надійності
-                HAL_Delay(100); // Задержка 
-                MksServo_CurrentAxisToZero_92(&mksServo); // Сброс текущей оси в ноль
-                printf("[FSM] -> Scan (double_pedal pressed)\n");
             }
         }
         if (stateMachine.is(State::Scan))
@@ -338,7 +382,7 @@ void StateMachine_loop(void)
                 int pot_percent = getPotentiometerValuePercentage();
                 int angle = (pot_percent * 360) / 100;
 
-                // Здесь используйте angle для вашей логики осцилляции
+                // Здесь  angle для  логики осцилляции
                 // Например:
                 printf("[FSM] ANGLE_ADJUST: angle=%d deg, speed=%d\n", angle, last_speed);
                 // Управление сервоприводом или другой логикой — по вашему проекту
@@ -348,14 +392,20 @@ void StateMachine_loop(void)
                 // Очищаем домашнюю позицию при выходе из Scan
                 // stateMachine.clearHomePosition();
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-                mode_scan = ANGLE_SCAN;
+
                 stateMachine.setState(State::Manual);
-                nrgf_send_angle_agiust_exit();                  // Выходим из режима ANGLE_ADJUST
-                // --- Запись значения угла в EEPROM ---
-               FlashStorage_SaveOscillationAngle(motor_angle);
+                nrgf_send_angle_agiust_exit(); // Выходим из режима ANGLE_ADJUST
+                                               // --- Запись значения угла в EEPROM ---
+                if (mode_scan == ANGLE_ADJUST)
+                {
+                    mode_scan = ANGLE_SCAN;
+                    FlashStorage_SaveOscillationAngle(motor_angle);
+                }
+
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
                 printf("[FSM] -> Manual (pedal released)\n");
-                HAL_Delay(100); // Задержка для предотвращения дребезга
+                HAL_Delay(50); // Задержка для предотвращения дребезга
+               MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo 
             }
         }
     }
@@ -369,7 +419,6 @@ void StateMachine_loop(void)
             flag_blocked_for_debounce = 0;
         }
     }
-  
 }
 
 void StateMachine_setup(void)

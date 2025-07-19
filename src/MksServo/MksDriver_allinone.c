@@ -781,3 +781,34 @@ uint8_t MksServo_QueryStatus_F1(MksServo_t *servo, uint32_t timeout_ms)
     printf("[MKS][F1] Timeout waiting for F1 response\r\n");
     return 0;
 }
+// Установка рабочего тока SERVO42D/57D (Ma option)
+uint8_t MksServo_SetWorkingCurrent(MksServo_t *servo, uint16_t current_ma, uint32_t timeout_ms) {
+    uint8_t tx[6];
+    tx[0] = 0xFA; // Head
+    tx[1] = servo->device_address; // Slave addr
+    tx[2] = 0x83; // Function (Set working current)
+    tx[3] = current_ma & 0xFF;        // Low byte (LE)
+    tx[4] = (current_ma >> 8) & 0xFF; // High byte (LE)
+    tx[5] = MksServo_GetCheckSum(tx, 5); // CRC
+
+    printf("[MKS] Setting working current to %u mA\r\n", current_ma);
+
+    // Включаем передачу RS485
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 6, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+
+    // Ждем ответ от сервопривода (FB 01 83 status CRC)
+    return MksServo_WaitForACK(servo, 5, timeout_ms);
+}
+// Установка процента удерживающего тока SERVO42D/57D
+void MksServo_SetHoldingCurrent(MksServo_t *servo, uint8_t percent_code) {
+    uint8_t packet[5];
+    packet[0] = 0xFA;           // Head
+    packet[1] = servo->device_address; // Slave addr
+    packet[2] = 0x9B;           // Function
+    packet[3] = percent_code;   // holdMa (0x00...0x08)
+    packet[4] = packet[0] + packet[1] + packet[2] + packet[3]; // CRC
+    MksServo_SendRaw(servo, packet, 5);
+}
