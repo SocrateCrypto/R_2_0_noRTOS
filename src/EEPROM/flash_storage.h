@@ -1,3 +1,4 @@
+
 #ifndef FLASH_STORAGE_H
 #define FLASH_STORAGE_H
 
@@ -23,8 +24,10 @@ typedef struct __attribute__((packed)) {
     uint32_t binding_count;            // Счетчик привязок (для отладки)
     uint32_t last_binding_time;        // Время последней привязки
     int16_t oscillation_angle;         // Угол размаха поворота мотора (в шагах)
+    int64_t encoder_limit_right;       // Правая граница энкодера
+    int64_t encoder_limit_left;        // Левая граница энкодера
     uint32_t checksum;                 // Контрольная сумма
-    uint8_t reserved[30];              // Резерв для будущих параметров (уменьшен на 2 байта)
+    uint8_t reserved[14];              // Резерв для будущих параметров (уменьшен)
 } FlashStorage_t;
 
 // Функции для работы с Flash памятью
@@ -44,9 +47,16 @@ HAL_StatusTypeDef FlashStorage_LoadRemoteAddress(uint8_t address[5]);
 bool FlashStorage_HasValidRemoteAddress(void);
 void FlashStorage_PrintStoredAddress(void);
 
+
 // Функции для работы с углом размаха мотора
 HAL_StatusTypeDef FlashStorage_SaveOscillationAngle(int16_t angle);
 HAL_StatusTypeDef FlashStorage_LoadOscillationAngle(int16_t* angle);
+
+// Функции для работы с лимитами энкодера (границы калибровки)
+HAL_StatusTypeDef FlashStorage_SaveEncoderLimitRight(int64_t limit);
+HAL_StatusTypeDef FlashStorage_SaveEncoderLimitLeft(int64_t limit);
+HAL_StatusTypeDef FlashStorage_LoadEncoderLimitRight(int64_t* limit);
+HAL_StatusTypeDef FlashStorage_LoadEncoderLimitLeft(int64_t* limit);
 
 // Отладочные функции
 void FlashStorage_DebugDumpFlash(void);

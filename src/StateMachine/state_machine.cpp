@@ -249,13 +249,13 @@ void StateMachine_loop(void)
             if (!stateMachine.is(State::BindMode))
             {
                 stateMachine.setState(State::BindMode);
-                 printf("[FSM] -> BindMode\n");
+                printf("[FSM] -> BindMode\n");
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                HAL_Delay(50);                                 // Задержка для стабилизации после останов
+                HAL_Delay(50);                                // Задержка для стабилизации после останов
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
-                 HAL_Delay(150); 
+                HAL_Delay(150);
                 MksServo_SetWorkMode(&mksServo, 0); // Устанавливаем режим SR_CLOSE
-               
+
                 nrf_enter_binding_mode();                                    // Входим в режим привязки NRF
                 HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
             }
@@ -265,10 +265,28 @@ void StateMachine_loop(void)
         {
             if (!stateMachine.is(State::Calibrate))
             {
-                MksServo_Calibrate(&mksServo, 100);
+               // MksServo_Calibrate(&mksServo, 100);
                 stateMachine.setState(State::Calibrate);
                 printf("[FSM] -> Calibrate\n");
-                HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET); // Выключить лампочку
+                HAL_GPIO_WritePin(LAMP_GPIO_Port, LAMP_Pin, GPIO_PIN_RESET);
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // зупинка сервоприводу
+                HAL_Delay(200);                                 // Затримка для стабілізації після зупинки
+                while (MksServo_SetWorkMode(&mksServo, 3) < 1)  // Встановлення режиму SR_OPEN
+
+                {
+                    printf("[MKS] Failed to set work mode\r\n");
+                    HAL_Delay(100);
+                }
+
+                
+               while ( MksServo_SetWorkingCurrent(&mksServo, 200, 500)<1)
+      {
+        HAL_Delay(100);
+        printf("[MKS] Failed to set working current, retrying...\r\n");
+      }
+      HAL_Delay(50);
+      MksServo_SetHoldingCurrent(&mksServo, 0x00); // Установить 10% удерживающего тока
+                HAL_Delay(50); // Затримка для стабілізації після встановлення току // Выключить лампочку
             }
         }
         // 4. Gyro работает если FSM в Manual или Initial и не нажаты Bind/Calibrate
@@ -394,6 +412,7 @@ void StateMachine_loop(void)
                 HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
 
                 stateMachine.setState(State::Manual);
+
                 nrgf_send_angle_agiust_exit(); // Выходим из режима ANGLE_ADJUST
                                                // --- Запись значения угла в EEPROM ---
                 if (mode_scan == ANGLE_ADJUST)
@@ -404,8 +423,8 @@ void StateMachine_loop(void)
 
                 MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo
                 printf("[FSM] -> Manual (pedal released)\n");
-                HAL_Delay(50); // Задержка для предотвращения дребезга
-               MksServo_SpeedModeRun(&mksServo, 0x00, 0, 250); // stop servo 
+                HAL_Delay(70);                                // Задержка для предотвращения дребезга
+                MksServo_SpeedModeRun(&mksServo, 0x00, 0, 0); // stop servo
             }
         }
     }

@@ -787,8 +787,8 @@ uint8_t MksServo_SetWorkingCurrent(MksServo_t *servo, uint16_t current_ma, uint3
     tx[0] = 0xFA; // Head
     tx[1] = servo->device_address; // Slave addr
     tx[2] = 0x83; // Function (Set working current)
-    tx[3] = current_ma & 0xFF;        // Low byte (LE)
-    tx[4] = (current_ma >> 8) & 0xFF; // High byte (LE)
+    tx[3] = (current_ma >> 8) & 0xFF; // High byte (BE)
+    tx[4] = current_ma & 0xFF;        // Low byte (BE)
     tx[5] = MksServo_GetCheckSum(tx, 5); // CRC
 
     printf("[MKS] Setting working current to %u mA\r\n", current_ma);
@@ -800,7 +800,41 @@ uint8_t MksServo_SetWorkingCurrent(MksServo_t *servo, uint16_t current_ma, uint3
     HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
 
     // Ждем ответ от сервопривода (FB 01 83 status CRC)
-    return MksServo_WaitForACK(servo, 5, timeout_ms);
+    uint8_t ack_status = 0;
+    uint8_t rx[5] = {0};
+    uint32_t start = HAL_GetTick();
+    uint8_t rx_cnt = 0;
+    while ((HAL_GetTick() - start) < timeout_ms) {
+        uint8_t b;
+        if (MksServo_RxGetByte(servo, &b)) {
+            if (rx_cnt != 0) {
+                rx[rx_cnt++] = b;
+            } else if (b == 0xFB) {
+                rx[rx_cnt++] = b;
+            }
+            if (rx_cnt == 5) {
+                // Проверяем, что это ответ на команду 0x83
+                if (rx[2] == 0x83) {
+                    printf("[MKS][SetWorkingCurrent] ACK RX: ");
+                    for (int i = 0; i < 5; i++) printf("%02X ", rx[i]);
+                    printf("\r\n");
+                    if (rx[4] == MksServo_GetCheckSum(rx, 4)) {
+                        ack_status = rx[3];
+                        printf("[MKS][SetWorkingCurrent] Status: %d\r\n", ack_status);
+                        break;
+                    } else {
+                        printf("[MKS][SetWorkingCurrent] CRC ERROR\r\n");
+                    }
+                }
+                // Если не тот код, сбрасываем буфер и продолжаем искать
+                rx_cnt = 0;
+            }
+        }
+    }
+    if (!ack_status) {
+        printf("[MKS][SetWorkingCurrent] Timeout or no valid ACK (code 0x83)\r\n");
+    }
+    return ack_status;
 }
 // Установка процента удерживающего тока SERVO42D/57D
 void MksServo_SetHoldingCurrent(MksServo_t *servo, uint8_t percent_code) {
@@ -811,4 +845,23 @@ void MksServo_SetHoldingCurrent(MksServo_t *servo, uint8_t percent_code) {
     packet[3] = percent_code;   // holdMa (0x00...0x08)
     packet[4] = packet[0] + packet[1] + packet[2] + packet[3]; // CRC
     MksServo_SendRaw(servo, packet, 5);
+}
+
+uint8_t MksServo_SetLockedRotorProtection(MksServo_t *servo, uint8_t enable, uint32_t timeout_ms) {
+    uint8_t tx[5];
+    tx[0] = 0xFA; // Head
+    tx[1] = servo->device_address; // Slave addr
+    tx[2] = 0x88; // Function (Protect)
+    tx[3] = enable ? 0x01 : 0x00; // 1 - enable, 0 - disable
+    tx[4] = MksServo_GetCheckSum(tx, 4); // CRC
+
+    printf("[MKS] Setting locked-rotor protection to %d\r\n", enable);
+
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_UART_Transmit(servo->huart, tx, 5, 100);
+    HAL_GPIO_WritePin(servo->dere_port, servo->dere_pin, GPIO_PIN_RESET);
+
+    // Ждем ответ от сервопривода (FB 01 88 status CRC)
+    return MksServo_WaitForACK(servo, 5, timeout_ms);
 }

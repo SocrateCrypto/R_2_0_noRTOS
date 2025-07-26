@@ -71,6 +71,7 @@ void    MksServo_SendRaw(MksServo_t *servo, const uint8_t *data, uint16_t len);
 uint8_t MksServo_SetWorkingCurrent(MksServo_t *servo, uint16_t current_ma, uint32_t timeout_ms);
 // Установка процента удерживающего тока SERVO42D/57D
 void MksServo_SetHoldingCurrent(MksServo_t *servo, uint8_t percent_code);
+uint8_t MksServo_SetLockedRotorProtection(MksServo_t *servo, uint8_t enable, uint32_t timeout_ms);
 // --- DEBUG ---
 uint8_t MksServo_ReadResponse(MksServo_t *servo, uint8_t *rx, uint8_t rx_len, uint32_t timeout_ms);
 // --- POSITION ---

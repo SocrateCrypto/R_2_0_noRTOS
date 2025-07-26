@@ -443,3 +443,57 @@ HAL_StatusTypeDef FlashStorage_LoadOscillationAngle(int16_t* angle) {
     
     return HAL_OK;
 }
+
+// --- Реализация функций для работы с лимитами энкодера ---
+HAL_StatusTypeDef FlashStorage_SaveEncoderLimitRight(int64_t limit) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    flash_data_cache.encoder_limit_right = limit;
+    flash_data_cache.checksum = FlashStorage_CalculateChecksum(&flash_data_cache);
+    printf("[Flash] Saving encoder_limit_right: %lld\n", (long long)limit);
+    return FlashStorage_SaveData(&flash_data_cache);
+}
+
+HAL_StatusTypeDef FlashStorage_SaveEncoderLimitLeft(int64_t limit) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    flash_data_cache.encoder_limit_left = limit;
+    flash_data_cache.checksum = FlashStorage_CalculateChecksum(&flash_data_cache);
+    printf("[Flash] Saving encoder_limit_left: %lld\n", (long long)limit);
+    return FlashStorage_SaveData(&flash_data_cache);
+}
+
+HAL_StatusTypeDef FlashStorage_LoadEncoderLimitRight(int64_t* limit) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    if (limit == NULL) {
+        return HAL_ERROR;
+    }
+    *limit = flash_data_cache.encoder_limit_right;
+    printf("[Flash] Loaded encoder_limit_right: %lld\n", (long long)*limit);
+    return HAL_OK;
+}
+
+HAL_StatusTypeDef FlashStorage_LoadEncoderLimitLeft(int64_t* limit) {
+    if (!cache_valid) {
+        if (FlashStorage_Init() != HAL_OK) {
+            return HAL_ERROR;
+        }
+    }
+    if (limit == NULL) {
+        return HAL_ERROR;
+    }
+    *limit = flash_data_cache.encoder_limit_left;
+    printf("[Flash] Loaded encoder_limit_left: %lld\n", (long long)*limit);
+    return HAL_OK;
+}
+// --- конец реализации ---
